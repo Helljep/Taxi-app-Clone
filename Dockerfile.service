@@ -1,0 +1,13 @@
+# One Dockerfile shared by the gateway and every backend service.
+# docker-compose tells it which folder to build with SERVICE_DIR.
+FROM node:20-slim
+
+ARG SERVICE_DIR
+WORKDIR /app
+
+COPY ${SERVICE_DIR}/package*.json ./
+RUN npm install --omit=dev
+
+COPY ${SERVICE_DIR}/ ./
+
+CMD ["node", "server.js"]

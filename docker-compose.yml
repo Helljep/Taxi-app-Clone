@@ -1,0 +1,126 @@
+# Starts everything with:  docker compose up --build
+#
+#   frontend  http://localhost:5173
+#   gateway   http://localhost:3000
+#   realtime  http://localhost:3005   (socket.io)
+#   rabbitmq  http://localhost:15672  (login: guest / guest)
+
+x-shared-env: &shared-env
+  JWT_SECRET: change-this-secret
+  INTERNAL_KEY: change-this-internal-key
+  RABBIT_URL: amqp://rabbitmq
+
+services:
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: gateway
+    ports:
+      - "3000:3000"
+    environment:
+      USER_SERVICE_URL: http://user:3001
+      CAPTAIN_SERVICE_URL: http://captain:3002
+      RIDE_SERVICE_URL: http://ride:3003
+      MAPS_SERVICE_URL: http://maps:3004
+    depends_on:
+      - user
+      - captain
+      - ride
+      - maps
+
+  user:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/user
+    environment:
+      <<: *shared-env
+      MONGO_URL: mongodb://mongo:27017/uber-users
+    depends_on:
+      - mongo
+
+  captain:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/captain
+    environment:
+      <<: *shared-env
+      MONGO_URL: mongodb://mongo:27017/uber-captains
+    depends_on:
+      - mongo
+      - rabbitmq
+
+  ride:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/ride
+    environment:
+      <<: *shared-env
+      MONGO_URL: mongodb://mongo:27017/uber-rides
+      USER_SERVICE_URL: http://user:3001
+      CAPTAIN_SERVICE_URL: http://captain:3002
+      MAPS_SERVICE_URL: http://maps:3004
+    depends_on:
+      - mongo
+      - rabbitmq
+
+  maps:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/maps
+    environment:
+      <<: *shared-env
+      SEARCH_COUNTRY: in
+
+  realtime:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/realtime
+    ports:
+      - "3005:3005"
+    environment:
+      <<: *shared-env
+    depends_on:
+      - rabbitmq
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      # these are used by the browser, so they point to localhost, not to docker names
+      VITE_BASE_URL: http://localhost:3000
+      VITE_SOCKET_URL: http://localhost:3005
+    depends_on:
+      - gateway
+      - realtime
+
+volumes:
+  mongo-data:
