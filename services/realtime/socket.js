@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { publishToQueue } = require('./services/rabbit');
 const state = require('./services/state');
 const { isImpossibleJump } = require('./services/gps');
+const driverIndex = require('./services/driverIndex');
 
 let io;
 
@@ -57,6 +58,7 @@ function joinRoom(socket, data) {
         if (decoded._id !== userId) {
             return socket.emit('error', { message: 'Token does not match user' });
         }
+        socket.data.vehicleType = decoded.vehicleType; // captains' tokens carry their vehicle type
     } catch (err) {
         return socket.emit('error', { message: 'Invalid token' });
     }
@@ -106,6 +108,10 @@ async function updateCaptainLocation(socket, data) {
 
     if (riderId) {
         io.to(`user:${riderId}`).emit('captain-location', location);
+    } else {
+        // a free driver goes on the live map that dispatch searches (every ping, it is cheap)
+        driverIndex.touch(userId, socket.data.vehicleType, location.ltd, location.lng)
+            .catch(err => console.log('Could not index driver:', err.message));
     }
 
     // 2. stored: only every few seconds, through the queue
@@ -138,6 +144,8 @@ async function leaveSupply(socket) {
 
     lastSaved.delete(userId);
     lastPosition.delete(userId);
+
+    driverIndex.remove(userId).catch(err => console.log('Could not unindex driver:', err.message));
 
     try {
         await publishToQueue('supply-events', JSON.stringify({ type: 'remove', captainId: userId }));

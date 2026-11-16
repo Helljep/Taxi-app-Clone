@@ -114,9 +114,18 @@ async function subscribeToQueue(queueName, callback) {
 }
 
 
+// declaring a queue is a network round trip, so it is done once per queue per channel,
+// not once per message (a reconnect creates a new channel and so declares again)
+let declaredOn = null;
+const declared = new Set();
+
 async function publishToQueue(queueName, data) {
     if (!channel) await connect();
-    await channel.assertQueue(queueName);
+    if (declaredOn !== channel) { declaredOn = channel; declared.clear(); }
+    if (!declared.has(queueName)) {
+        await channel.assertQueue(queueName);
+        declared.add(queueName);
+    }
     channel.sendToQueue(queueName, Buffer.from(data), { persistent: true });
 }
 

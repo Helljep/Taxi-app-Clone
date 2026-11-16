@@ -5,6 +5,8 @@ const userClient = require('./user.client');
 const captainClient = require('./captain.client');
 const crypto = require('crypto');
 const { RideError } = require('./errors');
+const driverIndex = require('./driverIndex');
+const { estimateRoute } = require('./geo');
 
 // a rider who cancels this many rides in this window is blocked for a while
 const MAX_CANCELS = 3;
@@ -54,6 +56,31 @@ function applySurge(fare, multiplier) {
 }
 
 
+// Distance and time of the trip. Normally from the routing server. If that is down (the
+// circuit breaker is open), too slow, or ROUTING=estimate is set (load tests), we fall
+// back to straight-line maths so a booking never fails just because a map server did.
+async function getRoute(pickup, destination, token, pickupCoordinates, destinationCoordinates) {
+    if (process.env.ROUTING !== 'estimate') {
+        try {
+            return await mapService.getDistanceTime(pickup, destination, token);
+        } catch (err) {
+            console.log('Routing unavailable, estimating the route:', err.message);
+        }
+    }
+
+    let to = destinationCoordinates;
+    if (!to) {
+        try { to = await mapService.getAddressCoordinate(destination, token); } catch (err) { /* handled below */ }
+    }
+    if (!pickupCoordinates || !to) {
+        throw new RideError('Maps are temporarily unavailable, please try again shortly', 503);
+    }
+    return estimateRoute(pickupCoordinates, to);
+}
+
+module.exports.getRoute = getRoute;
+
+
 // Also returns the pickup coordinates, so the controller can look up
 // nearby captains without geocoding the address a second time.
 async function getFare(pickup, destination, token) {
@@ -62,8 +89,8 @@ async function getFare(pickup, destination, token) {
         throw new RideError('Pickup and destination are required');
     }
 
-    const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
     const pickupCoordinates = await mapService.getAddressCoordinate(pickup, token);
+    const distanceTime = await getRoute(pickup, destination, token, pickupCoordinates);
     const surge = await heatmapClient.getSurge(pickupCoordinates.ltd, pickupCoordinates.lng);
 
     return {
@@ -101,7 +128,7 @@ module.exports.toClientShape = (ride) => {
 
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, token, pickupCoordinates, paymentMethod = 'cash'
+    user, pickup, destination, vehicleType, token, pickupCoordinates, destinationCoordinates, paymentMethod = 'cash'
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new RideError('All fields are required');
@@ -124,7 +151,7 @@ module.exports.createRide = async ({
         throw new RideError('You already have a ride in progress.', 409);
     }
 
-    const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
+    const distanceTime = await getRoute(pickup, destination, token, pickupCoordinates, destinationCoordinates);
     const surge = await heatmapClient.getSurge(pickupCoordinates.ltd, pickupCoordinates.lng);
     const fare = applySurge(calculateFare(distanceTime), surge.multiplier);
 
@@ -160,6 +187,11 @@ module.exports.confirmRide = async ({
         throw new RideError('Ride id is required');
     }
 
+    // Accepting twice is safe: if this captain already holds this ride (their first answer was
+    // lost in a network blip or a restart), return it again instead of an error.
+    const mine = await rideModel.findOne({ _id: rideId, captain: captain._id, status: 'accepted' }).select('+otp');
+    if (mine) return mine;
+
     const busy = await rideModel.findOne({ captain: captain._id, status: { $in: [ 'accepted', 'ongoing' ] } });
 
     if (busy) {
@@ -191,6 +223,9 @@ module.exports.confirmRide = async ({
     if (!ride) {
         throw new RideError('This ride is not offered to you or was already taken', 409);
     }
+
+    // the captain leaves the pool of free drivers at once, no more offers for them
+    await driverIndex.markOnRide(captain._id, ride._id).catch(err => console.log('Could not mark on ride:', err.message));
 
     return ride;
 }
@@ -259,6 +294,8 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw new RideError('Ride not found or not ongoing');
     }
 
+    driverIndex.markFree(captain._id).catch(() => {});
+
     ride.paymentStatus = await settlePayment(ride);
     await rideModel.updateOne({ _id: ride._id }, { paymentStatus: ride.paymentStatus });
 
@@ -294,6 +331,8 @@ module.exports.cancelRide = async ({ rideId, by, userId, captainId }) => {
     if (!ride) {
         throw new RideError('This ride cannot be cancelled');
     }
+
+    if (ride.captain) driverIndex.markFree(ride.captain).catch(() => {});
 
     return ride;
 }

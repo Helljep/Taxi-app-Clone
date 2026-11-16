@@ -1,0 +1,14 @@
+{
+  "name": "uber-clone-loadtest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simulates a surge of riders and drivers against the running stack",
+  "scripts": {
+    "setup": "node setup.js",
+    "run": "node run.js",
+    "demo": "node matching-demo.js"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}

@@ -1,0 +1,25 @@
+# Settings for the surge test. Use together with the normal file:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up --build
+#
+# - per-IP rate limits are lifted (the test sends everything from one machine)
+# - ROUTING=estimate: the ride service does not call the free OpenStreetMap servers
+# - shorter offer timeout so simulated drivers cycle through rides faster
+# - two copies of the ride service, to show the queue and matching work across copies
+
+services:
+  gateway:
+    environment:
+      RATE_LIMIT_PER_MIN: 100000000
+      AUTH_RATE_LIMIT_PER_MIN: 100000000
+      RIDE_RATE_LIMIT_PER_MIN: 100000000
+      ACCESS_LOG: "off"
+
+  ride:
+    deploy:
+      replicas: 2
+    environment:
+      ROUTING: estimate
+      OFFER_TIMEOUT_MS: 6000
+      MAX_WAIT_MS: 45000
+      MAX_QUEUE: 400

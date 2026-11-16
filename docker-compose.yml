@@ -4,6 +4,7 @@
 #   gateway   http://localhost:3000
 #   realtime  http://localhost:3005   (socket.io)
 #   rabbitmq  http://localhost:15672  (login: guest / guest)
+#   dashboard http://localhost:3000/dashboard  (live traffic, queue and matching numbers)
 
 x-restart: &restart
   restart: unless-stopped
@@ -106,9 +107,11 @@ services:
       CAPTAIN_SERVICE_URL: http://captain:3002
       MAPS_SERVICE_URL: http://maps:3004
       HEATMAP_SERVICE_URL: http://heatmap:3006
+      REDIS_URL: redis://redis:6379
     depends_on:
       - mongo
       - rabbitmq
+      - redis
 
   heatmap:
     <<: *restart

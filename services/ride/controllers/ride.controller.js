@@ -4,6 +4,9 @@ const mapService = require('../services/maps.client');
 const heatmapClient = require('../services/heatmap.client');
 const dispatch = require('../services/dispatch');
 const { publishEvent } = require('../services/events');
+const redis = require('../services/redis');
+const stats = require('../services/stats');
+const admission = require('../services/admission');
 
 
 const sendValidationErrors = (req, res) => {
@@ -19,29 +22,47 @@ const sendValidationErrors = (req, res) => {
 module.exports.createRide = async (req, res) => {
     if (sendValidationErrors(req, res)) return;
 
-    const { pickup, destination, vehicleType, paymentMethod } = req.body;
+    const { pickup, destination, vehicleType, paymentMethod, destinationCoordinates } = req.body;
+    const idemKey = req.get('idempotency-key') ? `idem:${req.user._id}:${req.get('idempotency-key')}` : null;
+
+    // A client that retries after a timeout or a 503 sends the same key. We hand back the
+    // ride we already made instead of making (or rejecting) a second one.
+    if (idemKey) {
+        try {
+            const earlier = await redis.get(idemKey);
+            if (earlier) return res.status(200).json(JSON.parse(earlier));
+        } catch (err) { /* optional */ }
+    }
 
     let ride, pickupCoordinates;
 
     try {
         // the pickup point decides the surge price and who is nearby, so look it up first
-        pickupCoordinates = await mapService.getAddressCoordinate(pickup, req.token);
+        // (apps that already know the coordinates can send them and skip the lookup)
+        pickupCoordinates = req.body.pickupCoordinates || await mapService.getAddressCoordinate(pickup, req.token);
 
         ride = await rideService.createRide({
-            user: req.user, pickup, destination, vehicleType, token: req.token, pickupCoordinates, paymentMethod
+            user: req.user, pickup, destination, vehicleType, token: req.token,
+            pickupCoordinates, destinationCoordinates, paymentMethod
         });
-        res.status(201).json(rideService.toClientShape(ride));
+
+        const body = rideService.toClientShape(ride);
+        if (idemKey) redis.set(idemKey, JSON.stringify(body), 'EX', 120).catch(() => {});
+
+        res.status(201).json(body);
     } catch (err) {
         console.log(err.message);
         return res.status(err.status || 500).json({ message: err.message });
     }
 
+    stats.incr('created');
+
     // this request is "demand" for the heatmap (fire and forget, never blocks the ride)
     heatmapClient.recordDemand(pickupCoordinates.ltd, pickupCoordinates.lng, ride._id);
 
-    // the user already has their answer, now offer the ride to the best captain
-    dispatch.startDispatch(ride._id, req.token)
-        .catch(err => console.log('Could not dispatch ride:', err.message));
+    // the user already has their answer; the ride now waits in the queue for the next batch
+    dispatch.startDispatch(ride._id)
+        .catch(err => console.log('Could not queue ride:', err.message));
 };
 
 module.exports.getFare = async (req, res) => {
@@ -76,6 +97,7 @@ module.exports.confirmRide = async (req, res) => {
         const rideData = rideService.toClientShape(ride);
 
         dispatch.stopDispatch(rideId);
+        stats.incr('accepted');
 
         await publishEvent('ride-confirmed', [ `user:${rideData.user._id}` ], rideData);
 
@@ -202,4 +224,19 @@ module.exports.rateRide = async (req, res) => {
     } catch (err) {
         return res.status(err.status || 400).json({ message: err.message });
     }
+}
+
+
+// numbers for the live dashboard (no login needed, nothing private in here)
+module.exports.engineStats = async (req, res) => {
+    try {
+        res.status(200).json(await stats.snapshot({ inflight: admission.inflight() }));
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports.resetStats = async (req, res) => {
+    await stats.reset();
+    res.status(204).end();
 }

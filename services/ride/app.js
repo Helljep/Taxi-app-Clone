@@ -12,10 +12,8 @@ const { connect: connectToRabbit } = require('./services/rabbit');
 connectToDb();
 connectToRabbit().catch(err => console.log(err.message));
 
-// rides left "pending" by a crash would wait forever, close them once the database is up
-mongoose.connection.once('open', () => {
-    dispatch.closeStaleRides().catch(err => console.log(err.message));
-});
+// once the database is up, start matching rides (this also repairs anything a crash left behind)
+mongoose.connection.once('open', () => dispatch.startEngine());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

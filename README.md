@@ -24,7 +24,9 @@ uber-clone/
 │   ├── maps/      3004    address search, distance and time (OpenStreetMap, free)
 │   ├── realtime/  3005    Socket.io server, pushes events to browsers
 │   └── heatmap/   3006    H3 cell counters in Redis, driver heatmap, surge multiplier
+├── loadtest/              surge simulator: fake drivers and riders, checks nothing is lost or double-booked
 ├── docker-compose.yml     starts all of it plus MongoDB, RabbitMQ and Redis
+├── docker-compose.loadtest.yml   settings for the surge test (2 ride-service copies, limits lifted)
 └── Dockerfile.service     one Dockerfile reused by every backend service
 ```
 
@@ -74,8 +76,8 @@ ride request     -> [Ride service] --POST /demand-------> [Heatmap service]
 
 | Feature | Where | How it works |
 |---|---|---|
-| Smart dispatch | `ride/services/dispatch.js` | A ride is offered to one captain at a time, nearest by driving time first. They have 15 s to accept; on Ignore or timeout the next captain gets it. If nobody is left, the ride is cancelled and the rider is told. |
-| ETA and route | `maps` service | "N mins away" per vehicle type and the route drawn on the map, both from OSRM. |
+| Batch dispatch | `ride/services/dispatch.js` | Rides wait in a Redis queue. Every 300 ms a batch is matched at once with the Hungarian algorithm (smallest total pickup time). Each driver gets one offer at a time, 15 s to accept; on Ignore or timeout the ride goes back in the queue. See "Surviving a traffic spike" below. |
+| ETA | `ride/services/dispatch.js` | "N mins away" per vehicle type comes from the Redis driver index (straight-line distance with a road factor). The trip fare uses OSRM, with a straight-line fallback. |
 | Scalable realtime | `realtime` service | Socket.io uses a Redis adapter and "which captain is on which ride" lives in Redis, so several realtime servers can run side by side. |
 | Reliable queues | each service's `rabbit.js` | A failing message is retried 3 times, then moved to `<queue>.dead` instead of being lost. Connections reconnect on their own. |
 | Rate limiting and monitoring | `gateway/middlewares` | Per-IP limits (overall, login, ride requests), `GET /metrics`, `GET /health` and an `x-request-id` on every request. |
@@ -88,8 +90,98 @@ Settings are environment variables: `RATE_LIMIT_PER_MIN`, `AUTH_RATE_LIMIT_PER_M
 `OFFER_TIMEOUT_MS` and `ACCESS_LOG=off`.
 
 Not built: Kafka (RabbitMQ does the job at this size), machine-learning pricing and fraud detection, sharding
-and multi-region, and a real payment provider. Known limits: dispatch countdowns live in the ride service's
-memory, and the gateway's rate-limit counts are per gateway.
+and multi-region, and a real payment provider. Known limits: the gateway's rate-limit counts are per gateway;
+one Redis (no cluster); events go out after the database write, so a crash between the two can drop a push
+message (the app should re-read its ride on reconnect, as the simulator does).
+
+## Surviving a traffic spike (the part this project is about)
+
+A "Diwali sale" for rides: thousands of people ask for a ride in the same minute, and drivers are limited.
+The system must not crash, must not lose a ride, and must never give one driver two rides.
+
+```
+ rider app
+    | POST /rides/create   (Idempotency-Key, so a retry never makes a second ride)
+    v
+ [Gateway] --> [Ride service, 1..N copies]
+                 1. ADMISSION CONTROL   queue full or too many in flight?  -> 503 + Retry-After   (load shedding)
+                 2. auth (cached 60 s), fare (route cache + circuit breaker + straight-line fallback), surge (cached 2 s)
+                 3. save ride in MongoDB, answer 201 straight away
+                 4. put the ride id in the Redis queue  ----------------------------+
+                                                                                     |
+ driver phone --GPS every 2 s--> [Realtime] --GEOADD--> Redis GEO + 30 s liveness    |
+                                                              |                      |
+                 every 300 ms, any copy:  pop a batch  <------+----------------------+
+                   GEOSEARCH nearest drivers for every ride (one pipeline)
+                   drop drivers who are gone / on a ride / already holding an offer
+                   cost matrix ride x driver = pickup minutes  ->  Hungarian algorithm
+                   claim each driver with SET NX  ->  save offer  ->  RabbitMQ  ->  driver's screen
+                 no answer in 15 s / declined / no driver nearby  -> back in the queue (up to 60 s)
+```
+
+What each piece does for you:
+
+| Problem in a spike | Answer | Where |
+|---|---|---|
+| Far more requests than the system can serve | Admission control: queue cap and in-flight cap, turn the rest away fast with `Retry-After`. Clients retry with random delay (jitter). | `ride/services/admission.js` |
+| A retry must not create a second ride | `Idempotency-Key` header, plus a unique index in MongoDB (one open ride per rider) | `ride.controller.js`, `ride.model.js` |
+| Finding the nearest drivers among thousands | Redis GEO index updated on every GPS ping; a driver silent for 30 s drops out on its own | `realtime/services/driverIndex.js`, `ride/services/driverIndex.js` |
+| Greedy matching wastes driver time | Batch matching with the Hungarian algorithm, O(n^2 m). Rides that waited longer are matched first when drivers are scarce. | `ride/services/hungarian.js`, `dispatch.js` |
+| Two riders getting the same driver | One offer per driver via Redis `SET NX`, and an offer can be accepted only by the driver who holds it (`findOneAndUpdate` on `currentOffer`) | `driverIndex.js`, `ride.service.js` |
+| Free map servers are slow or down | Cache for addresses and routes, circuit breaker, straight-line (haversine) fallback | `maps.client.js`, `breaker.js`, `geo.js` |
+| A service copy crashes | Queue and offers live in Redis, not memory. A repair job (every 15 s) compares Redis with MongoDB and restores rides that fell out of the queue. Accepting a ride twice is safe (idempotent). | `dispatch.js` `reconcile()` |
+| Prices | Surge = ride requests / free drivers in the pickup H3 hexagon and its 6 neighbours, clamped 1x to 3x | `heatmap` service |
+
+**The mathematics in one place.** Distance: haversine. Space: H3 hexagons (heatmap, surge) and Redis GEO (nearest drivers).
+Matching: minimise the sum of pickup times over a whole batch (assignment problem, Hungarian algorithm). Leaving a ride
+unmatched costs `1000 + seconds waited`, so older rides win scarce drivers. `node loadtest/matching-demo.js` compares it with
+greedy "nearest driver first" on random cities:
+
+| riders | drivers | greedy total | batch total | saved |
+|---|---|---|---|---|
+| 10 | 12 | 68.4 min | 61.3 min | 10.4 % |
+| 50 | 60 | 189.7 min | 156.2 min | 17.7 % |
+| 100 | 120 | 252.3 min | 204.4 min | 19.0 % |
+| 200 | 300 | 255.4 min | 223.7 min | 12.4 % |
+
+### Measured results (one laptop, Docker, simulated traffic)
+
+300 simulated drivers (real websockets, GPS every 2 s, 8 % ignore and 8 % decline offers) and 1500 simulated riders.
+5 requests/s, then a **150 requests/s spike for 40 s**, then calm again. Two ride-service copies, queue cap 400
+(set low on purpose so shedding is visible). Full reports are in `loadtest/results/`.
+
+| | Spike | Spike + one ride-service copy killed mid-spike (`docker kill`) |
+|---|---|---|
+| Ride requests | 1828 | 1984 |
+| Turned away with 503 and retried later | 3085 | 5568 |
+| Rides completed | 1715 | 1625 |
+| Cancelled (no driver within 45 s) | 27 | 71 |
+| **Rides lost or stuck** | **0** | **0** |
+| **Driver given two rides** | **0** | **0** |
+| Unexpected 5xx errors | 0 | 0 (109 gateway 502s while the copy was down, all retried) |
+| Matching batch | ~34 rides in ~56 ms | ~38 rides in ~57 ms |
+| Peak rides waiting | 440 | not sampled |
+
+How to read this honestly: it is one machine and simulated phones, so the numbers show behaviour (nothing lost, nothing
+crashes, the queue absorbs the spike), not production capacity. Riders waited a median of about 20 s for a driver because
+300 drivers cannot serve 150 requests per second; that is supply, not the engine. In the crash run, 2 rides were created
+whose reply was lost with the dead copy; they still reached a final state on the server. Two bugs were found by this test
+and fixed: `assertQueue` ran on every RabbitMQ publish (batches took about 1300 ms, now about 60 ms), and accepting a
+ride twice after a lost response returned an error instead of the same ride.
+
+### Run the surge test
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.loadtest.yml up --build -d
+cd loadtest && npm install
+DRIVERS=300 RIDERS=1500 node setup.js          # creates fake accounts through the real sign-up API
+SPIKE_RPS=150 SPIKE_S=40 node run.js           # prints the report and checks the invariants
+```
+
+Open http://localhost:3000/dashboard while it runs: queue depth, requests/s, offers/s, requests turned away, free
+drivers, time to first offer, batch size. To see crash recovery, run `docker kill uber-clone-ride-1` during the spike
+and `docker start uber-clone-ride-1` a few seconds later. The fake accounts use `@loadtest.dev` emails; remove them with
+`db.users.deleteMany({email:/@loadtest.dev$/})` in database `uber-users` and the same for `captains` in `uber-captains`.
 
 ## Why it is built this way ("how big companies handle traffic")
 
@@ -165,8 +257,6 @@ position comes from the browser's GPS. In Chrome DevTools you can fake a locatio
 
 - The free OpenStreetMap services (Nominatim, OSRM demo server) are for light use only. For production you
   would self-host them or pay for a provider.
-- The realtime service keeps "which captain is on which ride" in memory. With several realtime copies you
-  would move this to Redis and use the Socket.io Redis adapter.
 - Payments are not implemented (the original had unused payment fields; they were dropped).
 - The frontend runs in Vite dev mode inside Docker. For production run `npm run build` and serve `dist/`.
 

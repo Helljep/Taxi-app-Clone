@@ -1,5 +1,6 @@
 const dotenv = require('dotenv')
 dotenv.config()
+const path = require('path')
 const express = require('express')
 const cors = require('cors')
 const expressProxy = require('express-http-proxy')
@@ -14,6 +15,7 @@ app.use(requestId)
 app.use(metrics.trackRequests)
 
 app.get('/metrics', metrics.showMetrics)
+app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public', 'dashboard.html')))
 app.get('/health', (req, res) => res.json({ status: 'ok' }))
 
 app.use(rateLimits.general)
