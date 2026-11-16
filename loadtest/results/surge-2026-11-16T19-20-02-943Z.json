@@ -1,0 +1,71 @@
+{
+  "durationSeconds": 93,
+  "drivers": 300,
+  "riders": 1500,
+  "load": {
+    "baseRps": 5,
+    "spikeRps": 150,
+    "spikeSeconds": 40
+  },
+  "requests": {
+    "rideRequests": 2146,
+    "acceptedByApi": 1894,
+    "turnedAway503": 5301,
+    "gatewayErrors502": 0,
+    "clientRetries": 5301,
+    "gaveUpAfterRetries": 252
+  },
+  "outcome": {
+    "completed": 1867,
+    "cancelledNoDriver": 27,
+    "lost": 0,
+    "pushMessagesMissed": 0,
+    "recoveredByResync": 0
+  },
+  "drivers_": {
+    "offersSeen": 2214,
+    "confirmed": 1867,
+    "declined": 170,
+    "ignored": 177,
+    "tooLateConflicts": 0
+  },
+  "latencyMs": {
+    "createApi": {
+      "p50": 1044,
+      "p95": 2876,
+      "p99": 3344
+    },
+    "requestToDriverAccepted": {
+      "p50": 21715,
+      "p95": 47363
+    },
+    "requestToTripComplete": {
+      "p50": 28851,
+      "p95": 53170
+    }
+  },
+  "queue": {
+    "peakDepth": 447,
+    "endDepth": 0,
+    "serverCounters": {
+      "created": 1894,
+      "noDriver": 10888,
+      "batches": 387,
+      "batchRides": 13203,
+      "batchMs": 21998,
+      "offers": 2214,
+      "accepted": 1867,
+      "declined": 170,
+      "expired": 177,
+      "claimLost": 101,
+      "shed": 5301,
+      "givenUp": 27
+    }
+  },
+  "invariants": {
+    "noRideLost": true,
+    "noDriverDoubleBooked": true,
+    "noDuplicateOutcomes": true,
+    "noUnexpected5xx": true
+  }
+}

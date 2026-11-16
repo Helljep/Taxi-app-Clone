@@ -114,4 +114,11 @@ const OPEN = { $in: [ 'pending', 'accepted', 'ongoing' ] };
 rideSchema.index({ user: 1 }, { unique: true, partialFilterExpression: { status: OPEN } });
 rideSchema.index({ captain: 1 }, { unique: true, partialFilterExpression: { status: { $in: [ 'accepted', 'ongoing' ] } } });
 
+// Indexes for the queries that run on every request. Without them MongoDB reads EVERY ride
+// ever created each time (found in load testing: ~30 ms per request at 16,000 rides, growing forever).
+rideSchema.index({ user: 1, status: 1, updatedAt: -1 });  // "how many rides did this rider cancel lately"
+rideSchema.index({ status: 1, updatedAt: 1 });            // the repair job: pending rides not touched lately
+rideSchema.index({ user: 1, createdAt: -1 });             // rider history
+rideSchema.index({ captain: 1, createdAt: -1 });          // captain history
+
 module.exports = mongoose.model('ride', rideSchema);
