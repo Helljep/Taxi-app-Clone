@@ -1,6 +1,17 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 
 const RidePopUp = (props) => {
+    // countdown: the ride moves to the next captain when this reaches zero
+    const [ secondsLeft, setSecondsLeft ] = useState(0)
+
+    useEffect(() => {
+        if (!props.ride?.offerSeconds) return
+        setSecondsLeft(props.ride.offerSeconds)
+
+        const timer = setInterval(() => setSecondsLeft(s => Math.max(0, s - 1)), 1000)
+        return () => clearInterval(timer)
+    }, [ props.ride?._id ])
+
     return (
         <div>
             <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
@@ -12,7 +23,9 @@ const RidePopUp = (props) => {
                     <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
                     <h2 className='text-lg font-medium'>{props.ride?.user.fullname.firstname + " " + props.ride?.user.fullname.lastname}</h2>
                 </div>
-                <h5 className='text-lg font-semibold'>2.2 KM</h5>
+                <h5 className='text-lg font-semibold'>
+                    {props.ride?.pickupEtaMinutes ? `${props.ride.pickupEtaMinutes} min away` : 'Nearby'}
+                </h5>
             </div>
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>
@@ -34,19 +47,22 @@ const RidePopUp = (props) => {
                         <i className="ri-currency-line"></i>
                         <div>
                             <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-                            <p className='text-sm -mt-1 text-gray-600'>Cash Cash</p>
+                            <p className='text-sm -mt-1 text-gray-600'>
+                                Pay by {props.ride?.paymentMethod || 'cash'}{props.ride?.surgeMultiplier > 1 && ` · ${props.ride.surgeMultiplier}x surge`}
+                            </p>
                         </div>
                     </div>
                 </div>
                 <div className='mt-5 w-full '>
                     <button onClick={() => {
-                        props.setConfirmRidePopupPanel(true)
                         props.confirmRide()
 
-                    }} className=' bg-green-600 w-full text-white font-semibold p-2 px-10 rounded-lg'>Accept</button>
+                    }} className=' bg-green-600 w-full text-white font-semibold p-2 px-10 rounded-lg'>
+                        Accept{secondsLeft > 0 && ` (${secondsLeft}s)`}
+                    </button>
 
                     <button onClick={() => {
-                        props.setRidePopupPanel(false)
+                        props.declineRide()
 
                     }} className='mt-2 w-full bg-gray-300 text-gray-700 font-semibold p-2 px-10 rounded-lg'>Ignore</button>
 

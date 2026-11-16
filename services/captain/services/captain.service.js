@@ -37,10 +37,32 @@ module.exports.updateLocation = async (captainId, ltd, lng) => {
 }
 
 
+module.exports.setStatus = async (captainId, status) => {
+    return await captainModel.findByIdAndUpdate(captainId, { status }, { new: true });
+}
+
+
+module.exports.addRating = async (captainId, rating) => {
+    return await captainModel.findByIdAndUpdate(captainId, {
+        $inc: { 'rating.sum': rating, 'rating.count': 1 }
+    }, { new: true });
+}
+
+
+// called when a ride is finished and paid
+module.exports.addEarnings = async (captainId, amount) => {
+    return await captainModel.findByIdAndUpdate(captainId, {
+        $inc: { earnings: amount, ridesCompleted: 1 }
+    }, { new: true });
+}
+
+
 // radius is in km
 module.exports.getCaptainsInTheRadius = async (ltd, lng, radius, vehicleType) => {
 
+    // only captains who are online
     const filter = {
+        status: 'active',
         location: {
             $geoWithin: {
                 $centerSphere: [ [ lng, ltd ], radius / 6371 ]

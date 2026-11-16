@@ -46,6 +46,42 @@ const rideSchema = new mongoose.Schema({
         default: 1,
     }, // 1 = normal price
 
+    vehicleType: {
+        type: String,
+        enum: [ 'auto', 'car', 'moto' ],
+    },
+
+    // where the pickup is, needed to find and rank nearby captains
+    pickupCoordinates: {
+        ltd: Number,
+        lng: Number,
+    },
+
+    // captains this ride was already offered to (dispatch never offers twice)
+    offeredTo: [ { type: mongoose.Schema.Types.ObjectId } ],
+
+    paymentMethod: {
+        type: String,
+        enum: [ 'cash', 'wallet' ],
+        default: 'cash',
+    },
+    paymentStatus: {
+        type: String,
+        enum: [ 'pending', 'paid', 'cash-due' ],  // cash-due = wallet was short, pay the captain in cash
+        default: 'pending',
+    },
+
+    cancelledBy: {
+        type: String,
+        enum: [ 'user', 'captain', 'system' ],
+    },
+
+    // the rider's rating of the captain, filled in after the ride
+    rating: {
+        score: { type: Number, min: 1, max: 5 },
+        comment: String,
+    },
+
     status: {
         type: String,
         enum: [ 'pending', 'accepted', "ongoing", 'completed', 'cancelled' ],

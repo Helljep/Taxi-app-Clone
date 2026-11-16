@@ -82,6 +82,49 @@ ride request     -> [Ride service] --POST /demand-------> [Heatmap service]
   window with no captain nearby and watch the hexagon turn orange and the fare rise.
 - Tests: `cd services/heatmap && npm test` (uses an in-memory Redis).
 
+## Production-style features
+
+| Feature | Where | How it works |
+|---|---|---|
+| **Smart dispatch** | `services/ride/services/dispatch.js` | A new ride is offered to ONE captain at a time, best first. Captains are ranked by real driving time (OSRM) to the pickup, busy ones are skipped. The captain has 15 s (`OFFER_TIMEOUT_MS`) to accept; on Ignore or timeout the next captain gets it; after 5 offers or nobody left, the ride is cancelled and the rider is told. |
+| **Real ETA + route** | `services/maps` (`/get-etas`, `/get-route`) | "N mins away" per vehicle type is the driving time of the nearest free captain. The route is drawn on the map. If OSRM is down, ETAs fall back to straight-line distance at 30 km/h. |
+| **Scale-out realtime** | `services/realtime` | Socket.io Redis adapter, so any number of realtime servers share rooms. "Which captain is on which ride" lives in Redis, not in server memory. |
+| **Reliable queues** | each service's `rabbit.js` | A failing message is retried 3 times with a growing delay, then parked in `<queue>.dead` (a dead-letter queue) instead of being lost. Connections reconnect and re-subscribe automatically. |
+| **Rate limiting** | `gateway/app.js` | 600 requests/min per IP overall, 20/min on login and register, 15/min on ride requests. Limits are env vars (`RATE_LIMIT_PER_MIN`, `AUTH_RATE_LIMIT_PER_MIN`, `RIDE_RATE_LIMIT_PER_MIN`). |
+| **Monitoring** | `gateway/app.js` | `GET /metrics` (Prometheus format: latency per service and status), `GET /health`, and an `x-request-id` on every request that is passed to the services and printed in the gateway log. |
+| **Online / offline** | captain home screen | Offline captains get no offers, send no GPS and leave the heatmap. |
+| **Cancel, history, ratings** | ride service | Riders cancel before the trip starts, captains after accepting; both sides are told live. Trip history for both. Riders rate 1 to 5 after the ride; captains show their average. |
+| **Payments (demo)** | user + ride service | Pay by cash or wallet. Wallet money is deducted atomically when the ride ends (never double-spent, never charged twice). If the wallet is short the rider pays cash. No real payment provider: top-ups are free test credit. |
+| **Fraud rules** | `realtime/services/fraud.js`, `ride/services/fraud.js` | GPS pings that teleport faster than 200 km/h are ignored. A rider who cancels 3 rides in 30 minutes is blocked for a while. One open ride per rider and per captain. |
+
+Not built (and why): Kafka (RabbitMQ does the job at this size), machine-learning pricing / ETA / fraud
+(these rules are the simple version), sharding and multi-region (they need several machines to mean anything;
+the Redis keys are per H3 cell on purpose, so they can be split by region later), a real payment provider.
+
+Known limits at scale: the dispatch countdowns live in the ride service's memory (several ride servers would
+need them in Redis or in delayed queue messages), and the gateway rate-limit counters are per gateway
+(several gateways would share them through Redis).
+
+### Load test
+
+`loadtest/loadtest.js` simulates many captains streaming GPS and many riders watching the heatmap, and
+prints pings per second, `/heatmap` latency and live pushes. It does not create rides, because that calls
+the free Nominatim/OSRM services, which do not allow load testing.
+
+```bash
+RATE_LIMIT_PER_MIN=10000000 AUTH_RATE_LIMIT_PER_MIN=10000000 ACCESS_LOG=off docker compose up --build
+```
+
+```bash
+cd loadtest && npm install && node loadtest.js --captains 300 --riders 50 --seconds 60
+```
+
+Watch the RabbitMQ dashboard while it runs: a queue whose depth keeps growing is a consumer that cannot
+keep up. To see scaling, run more realtime copies (`docker compose up --scale realtime=3` needs the
+port mapping removed and a load balancer in front, so this is a good exercise, not a one-liner).
+
+Unit tests: `npm test` inside `services/heatmap`, `services/ride` and `services/realtime`.
+
 ## Why it is built this way ("how big companies handle traffic")
 
 - **Gateway**: the browser knows one address. Services can move or scale without the frontend changing.

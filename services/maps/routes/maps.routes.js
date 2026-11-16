@@ -17,6 +17,19 @@ router.get('/get-distance-time',
     mapController.getDistanceTime
 )
 
+router.get('/get-route',
+    authMiddleware.authUser,
+    query('origin').isString().isLength({ min: 3 }),
+    query('destination').isString().isLength({ min: 3 }),
+    mapController.getRoute
+)
+
+// driving time from many points to one point (used by dispatch and the "X mins away" labels)
+router.post('/get-etas',
+    authMiddleware.authUser,
+    mapController.getEtas
+)
+
 router.get('/get-suggestions',
     authMiddleware.authUser,
     query('input').isString().isLength({ min: 3 }),

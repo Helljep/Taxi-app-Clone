@@ -33,6 +33,10 @@ const LookingForDriver = (props) => {
                         </div>
                     </div>
                 </div>
+                <p className='text-sm text-gray-500'>We offer your ride to the closest captain first, then the next one.</p>
+                <button
+                    onClick={props.cancelRide}
+                    className='w-full mt-2 bg-red-600 text-white font-semibold p-2 rounded-lg'>Cancel ride</button>
             </div>
         </div>
     )

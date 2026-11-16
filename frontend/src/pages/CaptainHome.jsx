@@ -19,6 +19,7 @@ const CaptainHome = () => {
     const ridePopupPanelRef = useRef(null)
     const confirmRidePopupPanelRef = useRef(null)
     const [ ride, setRide ] = useState(null)
+    const rideRef = useRef(null)   // lets socket listeners see the current ride
 
     const { socket } = useContext(SocketContext)
     const { captain } = useContext(CaptainDataContext)
@@ -31,33 +32,77 @@ const CaptainHome = () => {
         })
 
         const handleNewRide = (data) => {
+            rideRef.current = data
             setRide(data)
             setRidePopupPanel(true)
         }
 
-        socket.on('new-ride', handleNewRide)
+        // the offer ran out of time (or was taken back): close the pop-up
+        const handleOfferExpired = ({ rideId }) => {
+            if (rideRef.current?._id === rideId) {
+                setRidePopupPanel(false)
+            }
+        }
 
-        return () => socket.off('new-ride', handleNewRide)
+        // the rider cancelled
+        const handleRideCancelled = (cancelled) => {
+            if (rideRef.current?._id === cancelled._id) {
+                setRidePopupPanel(false)
+                setConfirmRidePopupPanel(false)
+                window.alert('The rider cancelled this ride.')
+            }
+        }
+
+        socket.on('new-ride', handleNewRide)
+        socket.on('ride-offer-expired', handleOfferExpired)
+        socket.on('ride-cancelled', handleRideCancelled)
+
+        return () => {
+            socket.off('new-ride', handleNewRide)
+            socket.off('ride-offer-expired', handleOfferExpired)
+            socket.off('ride-cancelled', handleRideCancelled)
+        }
     }, [])
+
+    // "Ignore": tell the server so the ride goes to the next captain straight away
+    async function declineRide() {
+        setRidePopupPanel(false)
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/decline`, { rideId: ride._id }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+        } catch (err) {
+            console.log(err.message)
+        }
+    }
 
     // the captain's position is shared by the map itself (see LiveTracking)
 
     async function confirmRide() {
 
-        const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm`, {
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/confirm`, {
 
-            rideId: ride._id,
-            captainId: captain._id,
+                rideId: ride._id,
+                captainId: captain._id,
 
 
-        }, {
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        })
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
 
-        setRidePopupPanel(false)
-        setConfirmRidePopupPanel(true)
+            setRidePopupPanel(false)
+            setConfirmRidePopupPanel(true)
+        } catch (err) {
+            // the offer expired, or the rider cancelled, before we tapped Accept
+            setRidePopupPanel(false)
+            setConfirmRidePopupPanel(false)
+            window.alert(err.response?.data?.message || 'This ride is no longer available.')
+        }
 
     }
 
@@ -106,6 +151,7 @@ const CaptainHome = () => {
                     setRidePopupPanel={setRidePopupPanel}
                     setConfirmRidePopupPanel={setConfirmRidePopupPanel}
                     confirmRide={confirmRide}
+                    declineRide={declineRide}
                 />
             </div>
             <div ref={confirmRidePopupPanelRef} className='fixed w-full h-screen z-10 bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>

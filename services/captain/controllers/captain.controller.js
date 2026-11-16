@@ -86,6 +86,53 @@ module.exports.logoutCaptain = async (req, res, next) => {
     res.status(200).json({ message: 'Logout successfully' });
 }
 
+// the online / offline switch in the captain app
+module.exports.updateStatus = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+        const captain = await captainService.setStatus(req.captain._id, req.body.status);
+        res.status(200).json({ captain });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// internal: the ride service reports a rider's rating of this captain
+module.exports.addRating = async (req, res) => {
+    const { captainId, rating } = req.body;
+
+    if (!captainId || !Number.isInteger(rating) || rating < 1 || rating > 5) {
+        return res.status(400).json({ message: 'captainId and a rating from 1 to 5 are required' });
+    }
+
+    try {
+        const captain = await captainService.addRating(captainId, rating);
+        res.status(200).json({ rating: captain.rating });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// internal: the ride service credits the captain when a ride is paid
+module.exports.addEarnings = async (req, res) => {
+    const { captainId, amount } = req.body;
+
+    if (!captainId || !(amount >= 0)) {
+        return res.status(400).json({ message: 'captainId and amount are required' });
+    }
+
+    try {
+        await captainService.addEarnings(captainId, amount);
+        res.status(204).end();
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
 // internal endpoint: the ride service asks "which captains are near this pickup?"
 module.exports.getNearbyCaptains = async (req, res) => {
     const { ltd, lng, radius, vehicleType } = req.query;

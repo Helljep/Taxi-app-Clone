@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useContext } from 'react'
+import axios from 'axios'
 import HeatmapLayer from './HeatmapLayer'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -13,7 +14,7 @@ import { CaptainDataContext } from '../context/CapatainContext'
 
 const SEND_EVERY = 2000 // ms, no need to flood the server
 
-const LiveTracking = ({ showHeatmap = false }) => {
+const LiveTracking = ({ showHeatmap = false, routeFrom = null, routeTo = null }) => {
     const [ map, setMap ] = useState(null)
     const mapDivRef = useRef(null)
     const mapRef = useRef(null)
@@ -56,8 +57,8 @@ const LiveTracking = ({ showHeatmap = false }) => {
                 myMarkerRef.current.setLatLng([ latitude, longitude ])
             }
 
-            // captains share their position with the server
-            if (captain && Date.now() - lastSentRef.current > SEND_EVERY) {
+            // online captains share their position with the server (offline ones stay private)
+            if (captain && captain.status === 'active' && Date.now() - lastSentRef.current > SEND_EVERY) {
                 lastSentRef.current = Date.now()
                 socket.emit('update-location-captain', {
                     userId: captain._id,
@@ -68,6 +69,28 @@ const LiveTracking = ({ showHeatmap = false }) => {
 
         return () => navigator.geolocation.clearWatch(watchId)
     }, [ captain ])
+
+    // draw the driving route between two addresses (when the page asks for one)
+    useEffect(() => {
+        if (!map || !routeFrom || !routeTo) return
+
+        let line = null
+        let cancelled = false
+
+        axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-route`, {
+            params: { origin: routeFrom, destination: routeTo },
+            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+        }).then(response => {
+            if (cancelled) return
+            line = L.polyline(response.data.coordinates, { color: '#111827', weight: 5, opacity: 0.8 }).addTo(map)
+            map.fitBounds(line.getBounds(), { padding: [ 40, 40 ] })
+        }).catch(() => { })
+
+        return () => {
+            cancelled = true
+            if (line) line.remove()
+        }
+    }, [ map, routeFrom, routeTo ])
 
     // the user watches the captain move
     useEffect(() => {

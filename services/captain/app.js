@@ -18,12 +18,10 @@ app.use(cookieParser());
 // the realtime service drops captain positions on this queue,
 // we pick them up here and save them to the database
 subscribeToQueue('captain-location', async (msg) => {
-    try {
-        const { captainId, ltd, lng } = JSON.parse(msg);
-        await captainService.updateLocation(captainId, ltd, lng);
-    } catch (err) {
-        console.log('Could not save captain location', err.message);
-    }
+    // if this throws (eg. the database is briefly down) the queue helper retries the
+    // message and finally parks it in 'captain-location.dead'
+    const { captainId, ltd, lng } = JSON.parse(msg);
+    await captainService.updateLocation(captainId, ltd, lng);
 });
 
 

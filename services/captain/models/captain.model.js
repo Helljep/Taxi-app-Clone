@@ -30,8 +30,17 @@ const captainSchema = new mongoose.Schema({
     status: {
         type: String,
         enum: [ 'active', 'inactive' ],
-        default: 'inactive',
+        default: 'active',   // active = online and can receive rides
     },
+
+    // rider ratings (1-5) are stored as a running total so the average is cheap to compute
+    rating: {
+        sum: { type: Number, default: 0 },
+        count: { type: Number, default: 0 },
+    },
+
+    earnings: { type: Number, default: 0 },
+    ridesCompleted: { type: Number, default: 0 },
 
     vehicle: {
         color: {

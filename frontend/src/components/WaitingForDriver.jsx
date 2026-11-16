@@ -37,10 +37,13 @@ const WaitingForDriver = (props) => {
             <i className="ri-currency-line"></i>
             <div>
               <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-              <p className='text-sm -mt-1 text-gray-600'>Cash Cash</p>
+              <p className='text-sm -mt-1 text-gray-600'>Pay by {props.ride?.paymentMethod || 'cash'}</p>
             </div>
           </div>
         </div>
+        <button
+          onClick={props.cancelRide}
+          className='w-full mt-2 bg-red-600 text-white font-semibold p-2 rounded-lg'>Cancel ride</button>
       </div>
     </div>
   )

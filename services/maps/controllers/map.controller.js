@@ -40,6 +40,35 @@ module.exports.getDistanceTime = async (req, res, next) => {
     }
 }
 
+module.exports.getRoute = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    try {
+        res.status(200).json(await mapService.getRoute(req.query.origin, req.query.destination));
+    } catch (err) {
+        console.error(err.message);
+        res.status(404).json({ message: 'Route not found' });
+    }
+}
+
+module.exports.getEtas = async (req, res) => {
+    const { from, to } = req.body;
+
+    const valid = (p) => p && Number.isFinite(p.ltd) && Number.isFinite(p.lng);
+    if (!Array.isArray(from) || from.length === 0 || from.length > 50 || !from.every(valid) || !valid(to)) {
+        return res.status(400).json({ message: 'from (1 to 50 points) and to are required' });
+    }
+
+    try {
+        res.status(200).json(await mapService.getEtas(from, to));
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
 module.exports.getAutoCompleteSuggestions = async (req, res, next) => {
 
     try {

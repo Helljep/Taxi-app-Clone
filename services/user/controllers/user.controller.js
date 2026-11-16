@@ -74,6 +74,41 @@ module.exports.getUserProfile = async (req, res, next) => {
 
 }
 
+// add money to the demo wallet (no real payment provider is involved)
+module.exports.topUpWallet = async (req, res) => {
+    const amount = Number(req.body.amount);
+
+    if (!Number.isInteger(amount) || amount < 1 || amount > 10000) {
+        return res.status(400).json({ message: 'Amount must be a whole number from 1 to 10000' });
+    }
+
+    const user = await userModel.findByIdAndUpdate(req.user._id, { $inc: { wallet: amount } }, { new: true });
+    res.status(200).json({ wallet: user.wallet });
+}
+
+// internal: the ride service charges the wallet when a ride ends.
+// The balance check and the deduction happen in ONE database operation, so two
+// rides finishing at the same time can never spend the same money twice.
+module.exports.chargeWallet = async (req, res) => {
+    const { userId, amount } = req.body;
+
+    if (!userId || !(amount > 0)) {
+        return res.status(400).json({ message: 'userId and a positive amount are required' });
+    }
+
+    const user = await userModel.findOneAndUpdate(
+        { _id: userId, wallet: { $gte: amount } },
+        { $inc: { wallet: -amount } },
+        { new: true }
+    );
+
+    if (!user) {
+        return res.status(402).json({ message: 'Insufficient wallet balance' });
+    }
+
+    res.status(200).json({ wallet: user.wallet });
+}
+
 module.exports.logoutUser = async (req, res, next) => {
     const token = req.cookies.token || req.headers.authorization?.split(' ')[ 1 ];
     res.clearCookie('token');

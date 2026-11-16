@@ -11,7 +11,7 @@ import WaitingForDriver from '../components/WaitingForDriver';
 import { SocketContext } from '../context/SocketContext';
 import { useContext } from 'react';
 import { UserDataContext } from '../context/UserContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import LiveTracking from '../components/LiveTracking';
 
 const Home = () => {
@@ -34,11 +34,15 @@ const Home = () => {
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
     const [ ride, setRide ] = useState(null)
+    const [ paymentMethod, setPaymentMethod ] = useState('cash')
+    const [ notice, setNotice ] = useState('')
+    const [ routeFrom, setRouteFrom ] = useState(null)
+    const [ routeTo, setRouteTo ] = useState(null)
 
     const navigate = useNavigate()
 
     const { socket } = useContext(SocketContext)
-    const { user } = useContext(UserDataContext)
+    const { user, setUser } = useContext(UserDataContext)
 
     useEffect(() => {
         socket.emit("join", {
@@ -60,13 +64,25 @@ const Home = () => {
             navigate('/riding', { state: { ride } }) // Updated navigate to include ride data
         }
 
+        // the captain cancelled, or nobody nearby accepted: go back to the start
+        const handleRideCancelled = (cancelled) => {
+            setVehicleFound(false)
+            setWaitingForDriver(false)
+            setRide(null)
+            setNotice(cancelled.cancelledBy === 'captain'
+                ? 'Your captain cancelled the ride. Please book again.'
+                : (cancelled.reason || 'Your ride was cancelled.'))
+        }
+
         socket.on('ride-confirmed', handleRideConfirmed)
         socket.on('ride-started', handleRideStarted)
+        socket.on('ride-cancelled', handleRideCancelled)
 
         // remove the listeners when leaving the page so they don't pile up
         return () => {
             socket.off('ride-confirmed', handleRideConfirmed)
             socket.off('ride-started', handleRideStarted)
+            socket.off('ride-cancelled', handleRideCancelled)
         }
     }, [])
 
@@ -187,40 +203,101 @@ const Home = () => {
     async function findTrip() {
         setVehiclePanel(true)
         setPanelOpen(false)
+        setNotice('')
+        setFare({})
 
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
-            params: { pickup, destination },
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        })
+        try {
+            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/get-fare`, {
+                params: { pickup, destination },
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
 
+            setFare(response.data)
 
-        setFare(response.data)
-
-
+            // draw the route on the map
+            setRouteFrom(pickup)
+            setRouteTo(destination)
+        } catch {
+            setVehiclePanel(false)
+            setNotice('Could not find a price for that trip. Check both addresses.')
+        }
     }
 
     async function createRide() {
-        const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
-            pickup,
-            destination,
-            vehicleType
-        }, {
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
-            }
-        })
+        try {
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/create`, {
+                pickup,
+                destination,
+                vehicleType,
+                paymentMethod
+            }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
 
+            // keep the ride id so it can be cancelled, but never overwrite a ride a captain already accepted
+            setRide(current => current?.captain ? current : response.data)
+        } catch (err) {
+            setVehicleFound(false)
+            setNotice(err.response?.data?.message || 'Could not book the ride. Please try again.')
+        }
+    }
 
+    async function cancelRide() {
+        if (!ride?._id) return
+
+        try {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, { rideId: ride._id }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+            setVehicleFound(false)
+            setWaitingForDriver(false)
+            setRide(null)
+            setNotice('Ride cancelled.')
+        } catch (err) {
+            setNotice(err.response?.data?.message || 'This ride can no longer be cancelled.')
+        }
+    }
+
+    async function topUpWallet() {
+        const amount = Number(window.prompt('Add how many rupees to your wallet? (1 to 10000)', '200'))
+        if (!amount) return
+
+        try {
+            const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/users/wallet/topup`, { amount }, {
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+            setUser({ ...user, wallet: response.data.wallet })
+        } catch (err) {
+            setNotice(err.response?.data?.message || 'Could not add money.')
+        }
     }
 
     return (
         <div className='h-screen relative overflow-hidden'>
-            <img className='w-16 absolute left-5 top-5' src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.png" alt="" />
+            <img className='w-16 absolute left-5 top-5 z-10' src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.png" alt="" />
+            <div className='absolute right-4 top-4 z-10 flex items-center gap-2'>
+                <button onClick={topUpWallet} className='bg-white px-3 py-2 rounded-full text-sm font-semibold shadow'>
+                    <i className="ri-wallet-3-line"></i> ₹{user.wallet ?? 0} +
+                </button>
+                <Link to='/history' className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow'>
+                    <i className="text-lg ri-history-line"></i>
+                </Link>
+            </div>
+            {notice && (
+                <div onClick={() => setNotice('')} className='absolute top-20 left-4 right-4 z-20 bg-black text-white text-sm p-3 rounded-lg'>
+                    {notice}
+                </div>
+            )}
             <div className='h-screen w-screen'>
-                {/* image for temporary use  */}
-                <LiveTracking showHeatmap />
+                <LiveTracking showHeatmap routeFrom={routeFrom} routeTo={routeTo} />
             </div>
             <div className=' flex flex-col justify-end h-screen absolute top-0 w-full'>
                 <div className='h-[30%] p-6 bg-white relative'>
@@ -280,6 +357,9 @@ const Home = () => {
             </div>
             <div ref={confirmRidePanelRef} className='fixed w-full z-10 bottom-0 translate-y-full bg-white px-3 py-6 pt-12'>
                 <ConfirmRide
+                    paymentMethod={paymentMethod}
+                    setPaymentMethod={setPaymentMethod}
+                    walletBalance={user.wallet}
                     createRide={createRide}
                     pickup={pickup}
                     destination={destination}
@@ -290,6 +370,7 @@ const Home = () => {
             </div>
             <div ref={vehicleFoundRef} className='fixed w-full z-10 bottom-0 translate-y-full bg-white px-3 py-6 pt-12'>
                 <LookingForDriver
+                    cancelRide={cancelRide}
                     createRide={createRide}
                     pickup={pickup}
                     destination={destination}
@@ -299,6 +380,7 @@ const Home = () => {
             </div>
             <div ref={waitingForDriverRef} className='fixed w-full  z-10 bottom-0  bg-white px-3 py-6 pt-12'>
                 <WaitingForDriver
+                    cancelRide={cancelRide}
                     ride={ride}
                     setVehicleFound={setVehicleFound}
                     setWaitingForDriver={setWaitingForDriver}

@@ -24,6 +24,10 @@ router.get('/profile', authMiddleware.authUser, userController.getUserProfile)
 
 router.get('/logout', authMiddleware.authUser, userController.logoutUser)
 
+router.post('/wallet/topup', authMiddleware.authUser, userController.topUpWallet)
+
+router.post('/internal/charge', authMiddleware.internalOnly, userController.chargeWallet)
+
 
 
 module.exports = router;

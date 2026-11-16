@@ -13,6 +13,7 @@ import CaptainProtectWrapper from './pages/CaptainProtectWrapper'
 import CaptainLogout from './pages/CaptainLogout'
 import Riding from './pages/Riding'
 import CaptainRiding from './pages/CaptainRiding'
+import History from './pages/History'
 import 'remixicon/fonts/remixicon.css'
 
 const App = () => {
@@ -44,6 +45,16 @@ const App = () => {
             <CaptainHome />
           </CaptainProtectWrapper>
 
+        } />
+        <Route path='/history' element={
+          <UserProtectWrapper>
+            <History role='user' />
+          </UserProtectWrapper>
+        } />
+        <Route path='/captain-history' element={
+          <CaptainProtectWrapper>
+            <History role='captain' />
+          </CaptainProtectWrapper>
         } />
         <Route path='/captain/logout' element={
           <CaptainProtectWrapper>

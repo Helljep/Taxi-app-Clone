@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useState } from 'react'
+import axios from 'axios'
 import { Link, useLocation } from 'react-router-dom' // Added useLocation
 import { useEffect, useContext } from 'react'
 import { SocketContext } from '../context/SocketContext'
@@ -10,10 +11,13 @@ const Riding = () => {
     const { ride } = location.state || {} // Retrieve ride data
     const { socket } = useContext(SocketContext)
     const navigate = useNavigate()
+    const [ endedRide, setEndedRide ] = useState(null)
+    const [ stars, setStars ] = useState(0)
 
     useEffect(() => {
-        const handleRideEnded = () => {
-            navigate('/home')
+        // the ride is over: show the receipt and ask for a rating before going home
+        const handleRideEnded = (finished) => {
+            setEndedRide(finished)
         }
 
         socket.on("ride-ended", handleRideEnded)
@@ -21,14 +25,49 @@ const Riding = () => {
         return () => socket.off("ride-ended", handleRideEnded)
     }, [])
 
+    async function submitRating() {
+        try {
+            if (stars > 0) {
+                await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/rate`, {
+                    rideId: endedRide._id,
+                    rating: stars
+                }, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                })
+            }
+        } catch (err) {
+            console.log(err.response?.data?.message || err.message)
+        }
+        navigate('/home')
+    }
+
 
     return (
         <div className='h-screen'>
-            <Link to='/home' className='fixed right-2 top-2 h-10 w-10 bg-white flex items-center justify-center rounded-full'>
+            {endedRide && (
+                <div className='fixed inset-0 z-[1000] bg-black/60 flex items-end'>
+                    <div className='bg-white w-full rounded-t-2xl p-6'>
+                        <h3 className='text-2xl font-semibold'>You have arrived</h3>
+                        <p className='mt-2 text-lg'>₹{endedRide.fare} · {endedRide.paymentStatus === 'cash-due'
+                            ? 'wallet was short, please pay your captain in cash'
+                            : endedRide.paymentMethod === 'wallet' ? 'paid from your wallet' : 'pay your captain in cash'}</p>
+                        <p className='mt-4 text-gray-600'>How was your ride with {endedRide.captain?.fullname?.firstname}?</p>
+                        <div className='flex gap-2 mt-2 text-4xl'>
+                            {[ 1, 2, 3, 4, 5 ].map(n => (
+                                <button key={n} onClick={() => setStars(n)} className={n <= stars ? 'text-yellow-500' : 'text-gray-300'}>★</button>
+                            ))}
+                        </div>
+                        <button onClick={submitRating} className='w-full mt-6 bg-green-600 text-white font-semibold p-3 rounded-lg'>
+                            {stars > 0 ? 'Submit rating' : 'Skip'}
+                        </button>
+                    </div>
+                </div>
+            )}
+            <Link to='/home' className='fixed right-2 top-2 h-10 w-10 bg-white flex items-center justify-center rounded-full z-10'>
                 <i className="text-lg font-medium ri-home-5-line"></i>
             </Link>
             <div className='h-1/2'>
-                <LiveTracking />
+                <LiveTracking routeFrom={ride?.pickup} routeTo={ride?.destination} />
 
             </div>
             <div className='h-1/2 p-4'>
@@ -56,12 +95,12 @@ const Riding = () => {
                             <i className="ri-currency-line"></i>
                             <div>
                                 <h3 className='text-lg font-medium'>₹{ride?.fare} </h3>
-                                <p className='text-sm -mt-1 text-gray-600'>Cash Cash</p>
+                                <p className='text-sm -mt-1 text-gray-600'>Pay by {ride?.paymentMethod || 'cash'}</p>
                             </div>
                         </div>
                     </div>
                 </div>
-                <button className='w-full mt-5 bg-green-600 text-white font-semibold p-2 rounded-lg'>Make a Payment</button>
+                <p className='w-full mt-5 text-center text-gray-500 text-sm'>Payment is taken automatically when the trip ends.</p>
             </div>
         </div>
     )

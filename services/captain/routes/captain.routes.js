@@ -30,7 +30,18 @@ router.get('/profile', authMiddleware.authCaptain, captainController.getCaptainP
 
 router.get('/logout', authMiddleware.authCaptain, captainController.logoutCaptain)
 
+router.patch('/status', [
+    body('status').isIn([ 'active', 'inactive' ]).withMessage('Status must be active or inactive')
+],
+    authMiddleware.authCaptain,
+    captainController.updateStatus
+)
+
 router.get('/nearby', authMiddleware.internalOnly, captainController.getNearbyCaptains)
+
+router.post('/internal/rating', authMiddleware.internalOnly, captainController.addRating)
+
+router.post('/internal/earnings', authMiddleware.internalOnly, captainController.addEarnings)
 
 
 module.exports = router;

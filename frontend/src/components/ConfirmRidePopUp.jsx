@@ -39,7 +39,7 @@ const ConfirmRidePopUp = (props) => {
                     <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
                     <h2 className='text-lg font-medium capitalize'>{props.ride?.user.fullname.firstname}</h2>
                 </div>
-                <h5 className='text-lg font-semibold'>2.2 KM</h5>
+                <h5 className='text-lg font-semibold'>{props.ride?.pickupEtaMinutes ? `${props.ride.pickupEtaMinutes} min away` : ''}</h5>
             </div>
             <div className='flex gap-2 justify-between flex-col items-center'>
                 <div className='w-full mt-5'>
@@ -61,7 +61,7 @@ const ConfirmRidePopUp = (props) => {
                         <i className="ri-currency-line"></i>
                         <div>
                             <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-                            <p className='text-sm -mt-1 text-gray-600'>Cash Cash</p>
+                            <p className='text-sm -mt-1 text-gray-600'>Pay by {props.ride?.paymentMethod || 'cash'}</p>
                         </div>
                     </div>
                 </div>
@@ -71,11 +71,19 @@ const ConfirmRidePopUp = (props) => {
                         <input value={otp} onChange={(e) => setOtp(e.target.value)} type="text" className='bg-[#eee] px-6 py-4 font-mono text-lg rounded-lg w-full mt-3' placeholder='Enter OTP' />
 
                         <button className='w-full mt-5 text-lg flex justify-center bg-green-600 text-white font-semibold p-3 rounded-lg'>Confirm</button>
-                        <button onClick={() => {
+                        <button type='button' onClick={async () => {
+                            // cancelling after accepting tells the rider, so they can book someone else
+                            try {
+                                await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel-by-captain`, { rideId: props.ride._id }, {
+                                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                                })
+                            } catch (err) {
+                                console.log(err.response?.data?.message || err.message)
+                            }
                             props.setConfirmRidePopupPanel(false)
                             props.setRidePopupPanel(false)
 
-                        }} className='w-full mt-2 bg-red-600 text-lg text-white font-semibold p-3 rounded-lg'>Cancel</button>
+                        }} className='w-full mt-2 bg-red-600 text-lg text-white font-semibold p-3 rounded-lg'>Cancel ride</button>
 
                     </form>
                 </div>

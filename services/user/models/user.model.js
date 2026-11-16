@@ -26,6 +26,13 @@ const userSchema = new mongoose.Schema({
         required: true,
         select: false,
     },
+
+    // demo wallet balance in rupees, every new account starts with some credit
+    wallet: {
+        type: Number,
+        default: 500,
+        min: 0,
+    },
 })
 
 userSchema.methods.generateAuthToken = function () {

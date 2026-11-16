@@ -30,9 +30,20 @@ const ConfirmRide = (props) => {
                         <div>
                             <h3 className='text-lg font-medium'>₹{props.fare[ props.vehicleType ]}</h3>
                             <p className='text-sm -mt-1 text-gray-600'>
-                                Cash Cash{props.fare.surge?.multiplier > 1 && ` · includes ${props.fare.surge.multiplier}x surge`}
+                                Pay by {props.paymentMethod}{props.fare.surge?.multiplier > 1 && ` · includes ${props.fare.surge.multiplier}x surge`}
                             </p>
                         </div>
+                    </div>
+                    <div className='flex gap-2 px-3 pb-2'>
+                        {[ 'cash', 'wallet' ].map(method => (
+                            <button
+                                key={method}
+                                type='button'
+                                onClick={() => props.setPaymentMethod(method)}
+                                className={`flex-1 p-2 rounded-lg border-2 capitalize font-medium ${props.paymentMethod === method ? 'border-black bg-gray-100' : 'border-gray-200'}`}>
+                                {method === 'wallet' ? `Wallet (₹${props.walletBalance ?? 0})` : 'Cash'}
+                            </button>
+                        ))}
                     </div>
                 </div>
                 <button onClick={() => {

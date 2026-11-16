@@ -1,16 +1,19 @@
 const socketIo = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const { publishToQueue } = require('./services/rabbit');
+const state = require('./services/state');
+const { isImpossibleJump } = require('./services/fraud');
 
 let io;
 
-// captainId -> userId, for rides that are in progress.
-// This is how we know which user should see which captain moving on the map.
-const activeRides = new Map();
-
-// captainId -> time we last saved their position, so we don't write to the DB on every tick
+// captainId -> time we last saved their position, so we don't write to the DB on every tick.
+// A captain's socket always sticks to one realtime server, so keeping this per server is fine.
 const lastSaved = new Map();
 const SAVE_EVERY = 5000; // ms
+
+// captainId -> last accepted position, used to spot GPS spoofing
+const lastPosition = new Map();
 
 
 function initializeSocket(server) {
@@ -20,6 +23,10 @@ function initializeSocket(server) {
             methods: [ 'GET', 'POST' ]
         }
     });
+
+    // With the Redis adapter, io.to(room).emit(...) reaches sockets connected to ANY
+    // realtime server, so we can run as many copies of this service as we need.
+    io.adapter(createAdapter(state.redis.duplicate(), state.redis.duplicate()));
 
     io.on('connection', (socket) => {
         console.log(`Client connected: ${socket.id}`);
@@ -57,24 +64,37 @@ function initializeSocket(server) {
         // the captain's phone sends its position here, many times a minute
         socket.on('update-location-captain', async (data) => {
             const { userId, userType } = socket.data;
-            const { location } = data;
+            const { location } = data || {};
 
             if (userType !== 'captain') {
                 return socket.emit('error', { message: 'Join as a captain first' });
             }
 
-            if (!location || !location.ltd || !location.lng) {
+            if (!location || !Number.isFinite(location.ltd) || !Number.isFinite(location.lng)) {
                 return socket.emit('error', { message: 'Invalid location data' });
             }
 
+            // ignore positions that teleport faster than any vehicle can drive
+            const now = Date.now();
+            const position = { ltd: location.ltd, lng: location.lng, time: now };
+            if (isImpossibleJump(lastPosition.get(userId), position)) {
+                console.log(`Ignoring impossible GPS jump from captain ${userId}`);
+                return socket.emit('error', { message: 'Location ignored: impossible movement' });
+            }
+            lastPosition.set(userId, position);
+
             // 1. live: if this captain is on a ride, show the movement to that user right away
-            const riderId = activeRides.get(userId);
+            let riderId = null;
+            try {
+                riderId = await state.getRider(userId);
+            } catch (err) {
+                console.log('Could not read active ride', err.message);
+            }
             if (riderId) {
                 io.to(`user:${riderId}`).emit('captain-location', location);
             }
 
             // 2. stored: save to the DB, but only every few seconds, through the queue
-            const now = Date.now();
             if (now - (lastSaved.get(userId) || 0) >= SAVE_EVERY) {
                 lastSaved.set(userId, now);
                 try {
@@ -101,21 +121,30 @@ function initializeSocket(server) {
             }
         });
 
-        socket.on('disconnect', async () => {
-            console.log(`Client disconnected: ${socket.id}`);
 
-            // an offline captain is no longer supply
-            const { userId, userType } = socket.data;
-            if (userType === 'captain') {
-                lastSaved.delete(userId);
-                try {
-                    await publishToQueue('supply-events', JSON.stringify({ type: 'remove', captainId: userId }));
-                } catch (err) {
-                    console.log('Could not queue supply event', err.message);
-                }
-            }
+        // the captain switched to "offline": stop counting them as supply right away
+        socket.on('go-offline', () => leaveSupply(socket));
+
+        socket.on('disconnect', () => {
+            console.log(`Client disconnected: ${socket.id}`);
+            leaveSupply(socket);
         });
     });
+}
+
+
+// an offline captain is no longer supply
+async function leaveSupply(socket) {
+    const { userId, userType } = socket.data;
+    if (userType !== 'captain') return;
+
+    lastSaved.delete(userId);
+    lastPosition.delete(userId);
+    try {
+        await publishToQueue('supply-events', JSON.stringify({ type: 'remove', captainId: userId }));
+    } catch (err) {
+        console.log('Could not queue supply event', err.message);
+    }
 }
 
 
@@ -127,9 +156,9 @@ const sendToRooms = (rooms, event, data) => {
     io.to(rooms).emit(event, data);
 }
 
-const trackRide = (captainId, userId) => activeRides.set(String(captainId), String(userId));
+const trackRide = (captainId, userId) => state.trackRide(captainId, userId);
 
-const stopTrackingRide = (captainId) => activeRides.delete(String(captainId));
+const stopTrackingRide = (captainId) => state.stopTrackingRide(captainId);
 
 
 module.exports = { initializeSocket, sendToRooms, trackRide, stopTrackingRide };
