@@ -22,7 +22,8 @@ uber-clone/
 │   ├── captain/   3002    captain accounts, vehicle, saved location, "who is nearby"
 │   ├── ride/      3003    fares, creating / accepting / starting / ending rides
 │   ├── maps/      3004    address search, distance and time (OpenStreetMap, free)
-│   └── realtime/  3005    Socket.io server, pushes events to browsers
+│   ├── realtime/  3005    Socket.io server, pushes events to browsers
+│   └── heatmap/   3006    H3 cell counters in Redis, driver heatmap, surge multiplier
 ├── docker-compose.yml     starts all of it plus MongoDB and RabbitMQ
 └── Dockerfile.service     one Dockerfile reused by every backend service
 ```
@@ -54,6 +55,33 @@ Every backend service uses the same layout, so once you understand one you under
       <---- "ride-ended"                <---- same path <---- 4. captain taps Finish
 ```
 
+## Live driver heatmap and surge pricing
+
+Both the user map and the captain map show hexagons: **green** = free captains, **orange/red** = more
+ride requests than captains (surge). Hover a hexagon for its numbers. Surge shows up on the vehicle
+panel and is included in the fare.
+
+```
+captain GPS ping -> [Realtime] --"supply-events" queue--> [Heatmap service] -> Redis counters per H3 cell
+ride request     -> [Ride service] --POST /demand-------> [Heatmap service]
+[Ride service] <---- GET /surge (cell + 6 neighbours) ---- [Heatmap service]
+[Heatmap service] --"ride-events" queue (every 3s, only if changed)--> [Realtime] --> all browsers
+```
+
+- **H3 cells** (`h3-js`, resolution 8, about 0.7 km2): a lat/lng becomes one cell id, so "how many captains
+  are here" is a counter lookup, not a geo search over every captain.
+- **Redis** keeps a sorted set per cell (`supply:<cell>`, `demand:<cell>`). A captain who disconnects or
+  loses signal ages out after 30 s and a ride request counts for 5 minutes, so counts can't drift.
+  Captains on a ride are removed from supply.
+- **Surge** = `ride requests / free captains` in the pickup cell and its 6 neighbours, never below 1x and
+  capped at 3x (see `services/heatmap/services/surge.js`).
+- **Queue instead of Kafka**: RabbitMQ is already in this project and does the same job at this size.
+- **Sharding** (not built): at Uber scale you would split Redis by city or by the first digits of the
+  H3 cell id, so each shard owns a region.
+- Test it: run a captain window, wait about 5 s, a green hexagon appears. Then request rides from a user
+  window with no captain nearby and watch the hexagon turn orange and the fare rise.
+- Tests: `cd services/heatmap && npm test` (uses an in-memory Redis).
+
 ## Why it is built this way ("how big companies handle traffic")
 
 - **Gateway**: the browser knows one address. Services can move or scale without the frontend changing.
@@ -83,8 +111,8 @@ Open http://localhost:5173. RabbitMQ dashboard: http://localhost:15672 (guest / 
 
 ### Option B: without Docker
 
-You need Node 20+, MongoDB and RabbitMQ running locally. In each of `gateway`, `services/user`,
-`services/captain`, `services/ride`, `services/maps`, `services/realtime`:
+You need Node 20+, MongoDB, RabbitMQ and Redis running locally. In each of `gateway`, `services/user`,
+`services/captain`, `services/ride`, `services/maps`, `services/realtime`, `services/heatmap`:
 
 ```bash
 cp .env.example .env

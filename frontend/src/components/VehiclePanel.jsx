@@ -7,6 +7,11 @@ const VehiclePanel = (props) => {
                 props.setVehiclePanel(false)
             }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
             <h3 className='text-2xl font-semibold mb-5'>Choose a Vehicle</h3>
+            {props.fare.surge?.multiplier > 1 && (
+                <div className='mb-3 p-2 rounded-lg bg-orange-100 text-orange-800 text-sm font-medium'>
+                    <i className="ri-flashlight-fill"></i> {props.fare.surge.multiplier}x surge: busy area, fewer captains than ride requests
+                </div>
+            )}
             <div onClick={() => {
                 props.setConfirmRidePanel(true)
                 props.selectVehicle('car')

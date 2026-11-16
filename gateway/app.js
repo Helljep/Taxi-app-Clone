@@ -15,6 +15,7 @@ app.use('/users', expressProxy(process.env.USER_SERVICE_URL))
 app.use('/captains', expressProxy(process.env.CAPTAIN_SERVICE_URL))
 app.use('/rides', expressProxy(process.env.RIDE_SERVICE_URL))
 app.use('/maps', expressProxy(process.env.MAPS_SERVICE_URL))
+app.use('/heatmap', expressProxy(process.env.HEATMAP_SERVICE_URL))
 
 
 app.get('/', (req, res) => {

@@ -2,6 +2,7 @@ const rideService = require('../services/ride.service');
 const { validationResult } = require('express-validator');
 const mapService = require('../services/maps.client');
 const captainService = require('../services/captain.client');
+const heatmapClient = require('../services/heatmap.client');
 const { publishToQueue } = require('../services/rabbit');
 
 
@@ -21,20 +22,24 @@ module.exports.createRide = async (req, res) => {
 
     const { pickup, destination, vehicleType } = req.body;
 
-    let ride;
+    let ride, pickupCoordinates;
 
     try {
-        ride = await rideService.createRide({ user: req.user, pickup, destination, vehicleType, token: req.token });
+        // the pickup point decides the surge price, so look it up first
+        pickupCoordinates = await mapService.getAddressCoordinate(pickup, req.token);
+
+        ride = await rideService.createRide({ user: req.user, pickup, destination, vehicleType, token: req.token, pickupCoordinates });
         res.status(201).json(rideService.toClientShape(ride));
     } catch (err) {
         console.log(err.message);
         return res.status(500).json({ message: err.message });
     }
 
+    // this request is "demand" for the heatmap (fire and forget, never blocks the ride)
+    heatmapClient.recordDemand(pickupCoordinates.ltd, pickupCoordinates.lng, ride._id);
+
     // the user already has their answer, now find captains and notify them
     try {
-        const pickupCoordinates = await mapService.getAddressCoordinate(pickup, req.token);
-
         const captainsInRadius = await captainService.getCaptainsInTheRadius(
             pickupCoordinates.ltd, pickupCoordinates.lng, 2, vehicleType
         );

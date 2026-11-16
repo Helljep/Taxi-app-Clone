@@ -27,6 +27,14 @@ services:
       timeout: 10s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   gateway:
     build:
       context: .
@@ -40,11 +48,13 @@ services:
       CAPTAIN_SERVICE_URL: http://captain:3002
       RIDE_SERVICE_URL: http://ride:3003
       MAPS_SERVICE_URL: http://maps:3004
+      HEATMAP_SERVICE_URL: http://heatmap:3006
     depends_on:
       - user
       - captain
       - ride
       - maps
+      - heatmap
 
   user:
     build:
@@ -83,8 +93,22 @@ services:
       USER_SERVICE_URL: http://user:3001
       CAPTAIN_SERVICE_URL: http://captain:3002
       MAPS_SERVICE_URL: http://maps:3004
+      HEATMAP_SERVICE_URL: http://heatmap:3006
     depends_on:
       - mongo
+      - rabbitmq
+
+  heatmap:
+    build:
+      context: .
+      dockerfile: Dockerfile.service
+      args:
+        SERVICE_DIR: services/heatmap
+    environment:
+      <<: *shared-env
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
       - rabbitmq
 
   maps:

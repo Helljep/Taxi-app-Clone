@@ -48,6 +48,9 @@ function initializeSocket(server) {
             socket.data.userId = userId;
             socket.data.userType = userType;
             socket.join(`${userType}:${userId}`);
+
+            // everyone who is logged in can watch the live driver heatmap
+            socket.join('heatmap');
         });
 
 
@@ -83,11 +86,34 @@ function initializeSocket(server) {
                 } catch (err) {
                     console.log('Could not queue location', err.message);
                 }
+
+                // 3. supply: tell the heatmap service this captain is free in this spot.
+                // A captain who is busy with a ride is not available supply, so remove them.
+                try {
+                    await publishToQueue('supply-events', JSON.stringify(
+                        riderId
+                            ? { type: 'remove', captainId: userId }
+                            : { type: 'ping', captainId: userId, ltd: location.ltd, lng: location.lng }
+                    ));
+                } catch (err) {
+                    console.log('Could not queue supply event', err.message);
+                }
             }
         });
 
-        socket.on('disconnect', () => {
+        socket.on('disconnect', async () => {
             console.log(`Client disconnected: ${socket.id}`);
+
+            // an offline captain is no longer supply
+            const { userId, userType } = socket.data;
+            if (userType === 'captain') {
+                lastSaved.delete(userId);
+                try {
+                    await publishToQueue('supply-events', JSON.stringify({ type: 'remove', captainId: userId }));
+                } catch (err) {
+                    console.log('Could not queue supply event', err.message);
+                }
+            }
         });
     });
 }

@@ -41,6 +41,11 @@ const rideSchema = new mongoose.Schema({
         required: true,
     },
 
+    surgeMultiplier: {
+        type: Number,
+        default: 1,
+    }, // 1 = normal price
+
     status: {
         type: String,
         enum: [ 'pending', 'accepted', "ongoing", 'completed', 'cancelled' ],

@@ -1,5 +1,6 @@
 const rideModel = require('../models/ride.model');
 const mapService = require('./maps.client');
+const heatmapClient = require('./heatmap.client');
 const crypto = require('crypto');
 
 function calculateFare(distanceTime) {
@@ -35,6 +36,16 @@ function calculateFare(distanceTime) {
 }
 
 
+// price rises when there are more ride requests than free captains nearby
+function applySurge(fare, multiplier) {
+    const surged = {};
+    for (const type of Object.keys(fare)) {
+        surged[ type ] = Math.round(fare[ type ] * multiplier);
+    }
+    return surged;
+}
+
+
 async function getFare(pickup, destination, token) {
 
     if (!pickup || !destination) {
@@ -42,8 +53,13 @@ async function getFare(pickup, destination, token) {
     }
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
+    const pickupCoordinates = await mapService.getAddressCoordinate(pickup, token);
+    const surge = await heatmapClient.getSurge(pickupCoordinates.ltd, pickupCoordinates.lng);
 
-    return calculateFare(distanceTime);
+    return {
+        ...applySurge(calculateFare(distanceTime), surge.multiplier),
+        surge: { multiplier: surge.multiplier, drivers: surge.drivers, demand: surge.demand }
+    };
 }
 
 module.exports.getFare = getFare;
@@ -73,14 +89,15 @@ module.exports.toClientShape = (ride) => {
 
 
 module.exports.createRide = async ({
-    user, pickup, destination, vehicleType, token
+    user, pickup, destination, vehicleType, token, pickupCoordinates
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
         throw new Error('All fields are required');
     }
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
-    const fare = calculateFare(distanceTime);
+    const surge = await heatmapClient.getSurge(pickupCoordinates.ltd, pickupCoordinates.lng);
+    const fare = applySurge(calculateFare(distanceTime), surge.multiplier);
 
     const ride = await rideModel.create({
         user: user._id,
@@ -89,6 +106,7 @@ module.exports.createRide = async ({
         destination,
         otp: getOtp(6),
         fare: fare[ vehicleType ],
+        surgeMultiplier: surge.multiplier,
         distance: distanceTime.distance.value,
         duration: distanceTime.duration.value
     })

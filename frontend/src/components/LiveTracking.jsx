@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useContext } from 'react'
+import React, { useEffect, useRef, useState, useContext } from 'react'
+import HeatmapLayer from './HeatmapLayer'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { SocketContext } from '../context/SocketContext'
@@ -12,7 +13,8 @@ import { CaptainDataContext } from '../context/CapatainContext'
 
 const SEND_EVERY = 2000 // ms, no need to flood the server
 
-const LiveTracking = () => {
+const LiveTracking = ({ showHeatmap = false }) => {
+    const [ map, setMap ] = useState(null)
     const mapDivRef = useRef(null)
     const mapRef = useRef(null)
     const myMarkerRef = useRef(null)
@@ -30,8 +32,10 @@ const LiveTracking = () => {
             maxZoom: 19,
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(mapRef.current)
+        setMap(mapRef.current)
 
         return () => {
+            setMap(null)
             mapRef.current.remove()
         }
     }, [])
@@ -82,7 +86,12 @@ const LiveTracking = () => {
         return () => socket.off('captain-location', handleCaptainLocation)
     }, [])
 
-    return <div ref={mapDivRef} style={{ width: '100%', height: '100%', position: 'relative', zIndex: 0 }} />
+    return (
+        <>
+            <div ref={mapDivRef} style={{ width: '100%', height: '100%', position: 'relative', zIndex: 0 }} />
+            {showHeatmap && <HeatmapLayer map={map} />}
+        </>
+    )
 }
 
 export default LiveTracking
