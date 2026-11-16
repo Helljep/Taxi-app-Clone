@@ -5,6 +5,9 @@
 #   realtime  http://localhost:3005   (socket.io)
 #   rabbitmq  http://localhost:15672  (login: guest / guest)
 
+x-restart: &restart
+  restart: unless-stopped
+
 x-shared-env: &shared-env
   JWT_SECRET: change-this-secret
   INTERNAL_KEY: change-this-internal-key
@@ -36,6 +39,7 @@ services:
       retries: 10
 
   gateway:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -62,6 +66,7 @@ services:
       - heatmap
 
   user:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -74,6 +79,7 @@ services:
       - mongo
 
   captain:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -87,6 +93,7 @@ services:
       - rabbitmq
 
   ride:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -104,6 +111,7 @@ services:
       - rabbitmq
 
   heatmap:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -117,6 +125,7 @@ services:
       - rabbitmq
 
   maps:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service
@@ -127,6 +136,7 @@ services:
       SEARCH_COUNTRY: in
 
   realtime:
+    <<: *restart
     build:
       context: .
       dockerfile: Dockerfile.service

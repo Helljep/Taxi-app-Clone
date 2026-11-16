@@ -48,7 +48,9 @@ function initializeSocket(server) {
 
 // Every browser says who it is as soon as it connects. Each person gets their own
 // "room", so we can message them by id instead of remembering socket ids.
-function joinRoom(socket, { userId, userType, token }) {
+function joinRoom(socket, data) {
+    const { userId, userType, token } = data || {};
+
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 

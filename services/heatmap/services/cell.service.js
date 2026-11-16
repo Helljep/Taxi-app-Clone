@@ -130,20 +130,29 @@ module.exports.getSnapshot = async () => {
 }
 
 
+// Only touches what is really stale right now. Other captains may have pinged
+// into these cells since they were counted, so nothing fresh is ever deleted.
 async function forgetCells(cells) {
     const cutoff = Date.now() - SUPPLY_TTL;
-    const multi = redis.multi();
+    const demandCutoff = Date.now() - DEMAND_WINDOW;
 
     for (const cell of cells) {
-        // captains that aged out are forgotten, unless they were counted in a newer cell
         const stale = await redis.zrangebyscore(`supply:${cell}`, '-inf', cutoff);
-        for (const captainId of stale) {
-            if (await redis.hget('captain:cell', captainId) === cell) {
-                multi.hdel('captain:cell', captainId);
-            }
-        }
-        multi.del(`supply:${cell}`, `demand:${cell}`);
-        multi.srem('cells', cell);
+        const current = stale.length ? await redis.hmget('captain:cell', ...stale) : [];
+
+        const multi = redis.multi();
+        stale.forEach((captainId, i) => {
+            if (current[i] === cell) multi.hdel('captain:cell', captainId);
+        });
+        if (stale.length) multi.zrem(`supply:${cell}`, ...stale);
+        multi.zremrangebyscore(`demand:${cell}`, '-inf', demandCutoff);
+        await multi.exec();
+
+        // drop the cell from the active list only if it is still empty
+        const [ drivers, demand ] = await Promise.all([
+            redis.zcard(`supply:${cell}`),
+            redis.zcard(`demand:${cell}`)
+        ]);
+        if (drivers === 0 && demand === 0) await redis.srem('cells', cell);
     }
-    await multi.exec();
 }

@@ -49,14 +49,20 @@ async function connect() {
 }
 
 
+// After a connection is lost keep trying until RabbitMQ is back, however long
+// that takes, then subscribe to every queue again.
 async function reconnect() {
-    try {
-        await connect();
-        for (const { queueName, callback } of consumers) {
-            await consume(queueName, callback);
+    while (true) {
+        try {
+            await connect();
+            for (const { queueName, callback } of consumers) {
+                await consume(queueName, callback);
+            }
+            return;
+        } catch (err) {
+            console.log('Could not reconnect to RabbitMQ, trying again in 5s:', err.message);
+            await wait(5000);
         }
-    } catch (err) {
-        console.log('Could not reconnect to RabbitMQ:', err.message);
     }
 }
 
