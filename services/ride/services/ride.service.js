@@ -1,9 +1,14 @@
 const rideModel = require('../models/ride.model');
 const mapService = require('./maps.client');
 const heatmapClient = require('./heatmap.client');
-const clients = require('./clients');
-const { isCancellationAbuse, CANCEL_WINDOW_MS } = require('./fraud');
+const userClient = require('./user.client');
+const captainClient = require('./captain.client');
 const crypto = require('crypto');
+
+// a rider who cancels this many rides in this window is blocked for a while
+const MAX_CANCELS = 3;
+const CANCEL_WINDOW = 30 * 60 * 1000; // ms
+
 
 function calculateFare(distanceTime) {
 
@@ -38,7 +43,7 @@ function calculateFare(distanceTime) {
 }
 
 
-// price rises when there are more ride requests than free captains nearby
+// when there are more requests than free captains nearby, every fare goes up
 function applySurge(fare, multiplier) {
     const surged = {};
     for (const type of Object.keys(fare)) {
@@ -48,7 +53,8 @@ function applySurge(fare, multiplier) {
 }
 
 
-// Also returns the pickup coordinates so the controller can look up ETAs without geocoding twice.
+// Also returns the pickup coordinates, so the controller can look up
+// nearby captains without geocoding the address a second time.
 async function getFare(pickup, destination, token) {
 
     if (!pickup || !destination) {
@@ -100,22 +106,22 @@ module.exports.createRide = async ({
         throw new Error('All fields are required');
     }
 
-    // fraud / abuse rule: someone who keeps booking and cancelling wastes captains' time
     const recentCancels = await rideModel.countDocuments({
         user: user._id,
         status: 'cancelled',
         cancelledBy: 'user',
-        updatedAt: { $gt: new Date(Date.now() - CANCEL_WINDOW_MS) }
+        updatedAt: { $gt: new Date(Date.now() - CANCEL_WINDOW) }
     });
-    if (isCancellationAbuse(recentCancels)) {
+
+    if (recentCancels >= MAX_CANCELS) {
         const err = new Error('Too many cancelled rides. Please try again in a few minutes.');
         err.status = 429;
         throw err;
     }
 
-    // one unfinished ride at a time per rider
-    const open = await rideModel.findOne({ user: user._id, status: { $in: [ 'pending', 'accepted', 'ongoing' ] } });
-    if (open) {
+    const openRide = await rideModel.findOne({ user: user._id, status: { $in: [ 'pending', 'accepted', 'ongoing' ] } });
+
+    if (openRide) {
         const err = new Error('You already have a ride in progress.');
         err.status = 409;
         throw err;
@@ -150,8 +156,8 @@ module.exports.confirmRide = async ({
         throw new Error('Ride id is required');
     }
 
-    // a captain can only drive one ride at a time
     const busy = await rideModel.findOne({ captain: captain._id, status: { $in: [ 'accepted', 'ongoing' ] } });
+
     if (busy) {
         throw new Error('You already have a ride in progress');
     }
@@ -208,21 +214,19 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
 }
 
 
-// Takes the fare from the rider (wallet) or marks it as cash. Called once per ride.
+// Wallet rides are charged here. If the wallet is short, the rider pays the captain in cash.
 async function settlePayment(ride) {
-    if (ride.paymentMethod === 'wallet') {
-        try {
-            const balance = await clients.chargeWallet(ride.user, ride.fare);
-            if (balance !== null) {
-                return 'paid';
-            }
-        } catch (err) {
-            console.log('Wallet charge failed:', err.message);
-        }
-        // not enough money (or the user service is down): the rider pays the captain in cash
+    if (ride.paymentMethod !== 'wallet') {
+        return 'paid';
+    }
+
+    try {
+        const balance = await userClient.chargeWallet(ride.user, ride.fare);
+        return balance === null ? 'cash-due' : 'paid';
+    } catch (err) {
+        console.log('Wallet charge failed:', err.message);
         return 'cash-due';
     }
-    return 'paid'; // cash is handed to the captain
 }
 
 module.exports.endRide = async ({ rideId, captain }) => {
@@ -230,8 +234,8 @@ module.exports.endRide = async ({ rideId, captain }) => {
         throw new Error('Ride id is required');
     }
 
-    // ongoing -> completed in ONE atomic step: a double tap on "Finish" can never
-    // charge the rider or pay the captain twice, because only one call wins this.
+    // Moving ongoing -> completed is one atomic step, so a double tap on "Finish"
+    // can never charge the rider or pay the captain twice.
     const ride = await rideModel.findOneAndUpdate(
         { _id: rideId, captain: captain._id, status: 'ongoing' },
         { status: 'completed' },
@@ -246,7 +250,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
     await rideModel.updateOne({ _id: ride._id }, { paymentStatus: ride.paymentStatus });
 
     try {
-        await clients.addCaptainEarnings(captain._id, ride.fare);
+        await captainClient.addEarnings(captain._id, ride.fare);
     } catch (err) {
         console.log('Could not credit captain earnings:', err.message);
     }
@@ -255,13 +259,14 @@ module.exports.endRide = async ({ rideId, captain }) => {
 }
 
 
-// who may cancel and when: the rider before the trip starts, the captain after accepting
+// A rider can cancel until the trip starts, a captain only after accepting.
 module.exports.cancelRide = async ({ rideId, by, userId, captainId }) => {
     if (!rideId) {
         throw new Error('Ride id is required');
     }
 
     const filter = { _id: rideId };
+
     if (by === 'user') {
         filter.user = userId;
         filter.status = { $in: [ 'pending', 'accepted' ] };
@@ -294,7 +299,7 @@ module.exports.rateRide = async ({ rideId, userId, score, comment }) => {
         throw new Error('Rating must be a whole number from 1 to 5');
     }
 
-    // "rating.score does not exist yet" makes sure a ride can only be rated once
+    // only a ride with no rating yet matches, so a ride can be rated once
     const ride = await rideModel.findOneAndUpdate(
         { _id: rideId, user: userId, status: 'completed', 'rating.score': { $exists: false } },
         { rating: { score, comment: String(comment || '').slice(0, 300) } },
@@ -306,7 +311,7 @@ module.exports.rateRide = async ({ rideId, userId, score, comment }) => {
     }
 
     try {
-        await clients.addCaptainRating(ride.captain, score);
+        await captainClient.addRating(ride.captain, score);
     } catch (err) {
         console.log('Could not save captain rating:', err.message);
     }

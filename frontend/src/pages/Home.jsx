@@ -34,6 +34,7 @@ const Home = () => {
     const [ fare, setFare ] = useState({})
     const [ vehicleType, setVehicleType ] = useState(null)
     const [ ride, setRide ] = useState(null)
+    const [ pendingRide, setPendingRide ] = useState(null)
     const [ paymentMethod, setPaymentMethod ] = useState('cash')
     const [ notice, setNotice ] = useState('')
     const [ routeFrom, setRouteFrom ] = useState(null)
@@ -69,6 +70,7 @@ const Home = () => {
             setVehicleFound(false)
             setWaitingForDriver(false)
             setRide(null)
+            setPendingRide(null)
             setNotice(cancelled.cancelledBy === 'captain'
                 ? 'Your captain cancelled the ride. Please book again.'
                 : (cancelled.reason || 'Your ride was cancelled.'))
@@ -238,8 +240,9 @@ const Home = () => {
                 }
             })
 
-            // keep the ride id so it can be cancelled, but never overwrite a ride a captain already accepted
-            setRide(current => current?.captain ? current : response.data)
+            // keep the id of the waiting ride so it can be cancelled.
+            // (kept apart from "ride", which only holds a ride a captain accepted)
+            setPendingRide(response.data)
         } catch (err) {
             setVehicleFound(false)
             setNotice(err.response?.data?.message || 'Could not book the ride. Please try again.')
@@ -247,10 +250,11 @@ const Home = () => {
     }
 
     async function cancelRide() {
-        if (!ride?._id) return
+        const rideId = ride?._id || pendingRide?._id
+        if (!rideId) return
 
         try {
-            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, { rideId: ride._id }, {
+            await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel`, { rideId }, {
                 headers: {
                     Authorization: `Bearer ${localStorage.getItem('token')}`
                 }
@@ -258,6 +262,7 @@ const Home = () => {
             setVehicleFound(false)
             setWaitingForDriver(false)
             setRide(null)
+            setPendingRide(null)
             setNotice('Ride cancelled.')
         } catch (err) {
             setNotice(err.response?.data?.message || 'This ride can no longer be cancelled.')

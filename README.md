@@ -24,7 +24,7 @@ uber-clone/
 │   ├── maps/      3004    address search, distance and time (OpenStreetMap, free)
 │   ├── realtime/  3005    Socket.io server, pushes events to browsers
 │   └── heatmap/   3006    H3 cell counters in Redis, driver heatmap, surge multiplier
-├── docker-compose.yml     starts all of it plus MongoDB and RabbitMQ
+├── docker-compose.yml     starts all of it plus MongoDB, RabbitMQ and Redis
 └── Dockerfile.service     one Dockerfile reused by every backend service
 ```
 
@@ -41,8 +41,8 @@ Every backend service uses the same layout, so once you understand one you under
   [ Gateway :3000 ] ---> [ Ride service ]                        |
                             | a. asks Maps service for distance -> fare
                             | b. saves the ride in MongoDB
-                            | c. asks Captain service "who is within 2 km?"
-                            | d. puts a "new-ride" message on RabbitMQ
+                            | c. offers the ride to the nearest free captain (Dispatch)
+                            | d. puts a "new-ride" message for that captain on RabbitMQ
                             v
                         [ RabbitMQ queue: ride-events ]
                             |
@@ -55,11 +55,10 @@ Every backend service uses the same layout, so once you understand one you under
       <---- "ride-ended"                <---- same path <---- 4. captain taps Finish
 ```
 
-## Live driver heatmap and surge pricing
+## Features beyond the basic ride flow
 
-Both the user map and the captain map show hexagons: **green** = free captains, **orange/red** = more
-ride requests than captains (surge). Hover a hexagon for its numbers. Surge shows up on the vehicle
-panel and is included in the fare.
+**Live driver heatmap and surge pricing.** Both maps show hexagons: green for free captains, orange to red
+where there are more ride requests than captains. Surge shows on the vehicle list and is included in the fare.
 
 ```
 captain GPS ping -> [Realtime] --"supply-events" queue--> [Heatmap service] -> Redis counters per H3 cell
@@ -68,62 +67,29 @@ ride request     -> [Ride service] --POST /demand-------> [Heatmap service]
 [Heatmap service] --"ride-events" queue (every 3s, only if changed)--> [Realtime] --> all browsers
 ```
 
-- **H3 cells** (`h3-js`, resolution 8, about 0.7 km2): a lat/lng becomes one cell id, so "how many captains
-  are here" is a counter lookup, not a geo search over every captain.
-- **Redis** keeps a sorted set per cell (`supply:<cell>`, `demand:<cell>`). A captain who disconnects or
-  loses signal ages out after 30 s and a ride request counts for 5 minutes, so counts can't drift.
-  Captains on a ride are removed from supply.
-- **Surge** = `ride requests / free captains` in the pickup cell and its 6 neighbours, never below 1x and
-  capped at 3x (see `services/heatmap/services/surge.js`).
-- **Queue instead of Kafka**: RabbitMQ is already in this project and does the same job at this size.
-- **Sharding** (not built): at Uber scale you would split Redis by city or by the first digits of the
-  H3 cell id, so each shard owns a region.
-- Test it: run a captain window, wait about 5 s, a green hexagon appears. Then request rides from a user
-  window with no captain nearby and watch the hexagon turn orange and the fare rise.
-- Tests: `cd services/heatmap && npm test` (uses an in-memory Redis).
-
-## Production-style features
+- The map is cut into H3 hexagons (about 0.7 km2), so "how many captains are here" is a counter lookup.
+- Redis keeps a sorted set per hexagon. A captain who loses signal ages out after 30 s and a ride request
+  counts for 5 minutes, so counts can't drift. Captains on a ride are not counted as free.
+- Surge is `ride requests / free captains` in the pickup hexagon and its 6 neighbours, from 1x up to 3x.
 
 | Feature | Where | How it works |
 |---|---|---|
-| **Smart dispatch** | `services/ride/services/dispatch.js` | A new ride is offered to ONE captain at a time, best first. Captains are ranked by real driving time (OSRM) to the pickup, busy ones are skipped. The captain has 15 s (`OFFER_TIMEOUT_MS`) to accept; on Ignore or timeout the next captain gets it; after 5 offers or nobody left, the ride is cancelled and the rider is told. |
-| **Real ETA + route** | `services/maps` (`/get-etas`, `/get-route`) | "N mins away" per vehicle type is the driving time of the nearest free captain. The route is drawn on the map. If OSRM is down, ETAs fall back to straight-line distance at 30 km/h. |
-| **Scale-out realtime** | `services/realtime` | Socket.io Redis adapter, so any number of realtime servers share rooms. "Which captain is on which ride" lives in Redis, not in server memory. |
-| **Reliable queues** | each service's `rabbit.js` | A failing message is retried 3 times with a growing delay, then parked in `<queue>.dead` (a dead-letter queue) instead of being lost. Connections reconnect and re-subscribe automatically. |
-| **Rate limiting** | `gateway/app.js` | 600 requests/min per IP overall, 20/min on login and register, 15/min on ride requests. Limits are env vars (`RATE_LIMIT_PER_MIN`, `AUTH_RATE_LIMIT_PER_MIN`, `RIDE_RATE_LIMIT_PER_MIN`). |
-| **Monitoring** | `gateway/app.js` | `GET /metrics` (Prometheus format: latency per service and status), `GET /health`, and an `x-request-id` on every request that is passed to the services and printed in the gateway log. |
-| **Online / offline** | captain home screen | Offline captains get no offers, send no GPS and leave the heatmap. |
-| **Cancel, history, ratings** | ride service | Riders cancel before the trip starts, captains after accepting; both sides are told live. Trip history for both. Riders rate 1 to 5 after the ride; captains show their average. |
-| **Payments (demo)** | user + ride service | Pay by cash or wallet. Wallet money is deducted atomically when the ride ends (never double-spent, never charged twice). If the wallet is short the rider pays cash. No real payment provider: top-ups are free test credit. |
-| **Fraud rules** | `realtime/services/fraud.js`, `ride/services/fraud.js` | GPS pings that teleport faster than 200 km/h are ignored. A rider who cancels 3 rides in 30 minutes is blocked for a while. One open ride per rider and per captain. |
+| Smart dispatch | `ride/services/dispatch.js` | A ride is offered to one captain at a time, nearest by driving time first. They have 15 s to accept; on Ignore or timeout the next captain gets it. If nobody is left, the ride is cancelled and the rider is told. |
+| ETA and route | `maps` service | "N mins away" per vehicle type and the route drawn on the map, both from OSRM. |
+| Scalable realtime | `realtime` service | Socket.io uses a Redis adapter and "which captain is on which ride" lives in Redis, so several realtime servers can run side by side. |
+| Reliable queues | each service's `rabbit.js` | A failing message is retried 3 times, then moved to `<queue>.dead` instead of being lost. Connections reconnect on their own. |
+| Rate limiting and monitoring | `gateway/middlewares` | Per-IP limits (overall, login, ride requests), `GET /metrics`, `GET /health` and an `x-request-id` on every request. |
+| Online / offline | captain home | Offline captains get no offers and leave the heatmap. |
+| Cancel, history, ratings | `ride` service | Riders cancel before the trip starts, captains after accepting. Both see their trips. Riders rate 1 to 5. |
+| Payments (demo) | `user` + `ride` services | Cash or wallet. The wallet is charged once, atomically, when the ride ends; if it is short the rider pays cash. Top-ups are free test credit, there is no payment provider. |
+| Abuse rules | `realtime/services/gps.js`, `ride/services/ride.service.js` | GPS jumps faster than 200 km/h are ignored, a rider who cancels 3 rides in 30 minutes is blocked for a while, and each rider and captain can have one open ride. |
 
-Not built (and why): Kafka (RabbitMQ does the job at this size), machine-learning pricing / ETA / fraud
-(these rules are the simple version), sharding and multi-region (they need several machines to mean anything;
-the Redis keys are per H3 cell on purpose, so they can be split by region later), a real payment provider.
+Settings are environment variables: `RATE_LIMIT_PER_MIN`, `AUTH_RATE_LIMIT_PER_MIN`, `RIDE_RATE_LIMIT_PER_MIN`,
+`OFFER_TIMEOUT_MS` and `ACCESS_LOG=off`.
 
-Known limits at scale: the dispatch countdowns live in the ride service's memory (several ride servers would
-need them in Redis or in delayed queue messages), and the gateway rate-limit counters are per gateway
-(several gateways would share them through Redis).
-
-### Load test
-
-`loadtest/loadtest.js` simulates many captains streaming GPS and many riders watching the heatmap, and
-prints pings per second, `/heatmap` latency and live pushes. It does not create rides, because that calls
-the free Nominatim/OSRM services, which do not allow load testing.
-
-```bash
-RATE_LIMIT_PER_MIN=10000000 AUTH_RATE_LIMIT_PER_MIN=10000000 ACCESS_LOG=off docker compose up --build
-```
-
-```bash
-cd loadtest && npm install && node loadtest.js --captains 300 --riders 50 --seconds 60
-```
-
-Watch the RabbitMQ dashboard while it runs: a queue whose depth keeps growing is a consumer that cannot
-keep up. To see scaling, run more realtime copies (`docker compose up --scale realtime=3` needs the
-port mapping removed and a load balancer in front, so this is a good exercise, not a one-liner).
-
-Unit tests: `npm test` inside `services/heatmap`, `services/ride` and `services/realtime`.
+Not built: Kafka (RabbitMQ does the job at this size), machine-learning pricing and fraud detection, sharding
+and multi-region, and a real payment provider. Known limits: dispatch countdowns live in the ride service's
+memory, and the gateway's rate-limit counts are per gateway.
 
 ## Why it is built this way ("how big companies handle traffic")
 
@@ -180,7 +146,7 @@ Live tracking uses the browser's GPS, so test with two browser windows (one norm
 3. Window A: a ride pop-up appears. Accept, then enter the 6-digit OTP shown on the user's screen.
 4. Both windows now show the map. Finish the ride from the captain side.
 
-The captain must be within 2 km of the pickup. Use a pickup near your own location, because the captain's
+The captain must be online and within 3 km of the pickup. Use a pickup near your own location, because the captain's
 position comes from the browser's GPS. In Chrome DevTools you can fake a location under
 *Sensors* if you want to test two different places.
 

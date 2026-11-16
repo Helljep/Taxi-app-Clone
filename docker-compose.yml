@@ -49,8 +49,7 @@ services:
       RIDE_SERVICE_URL: http://ride:3003
       MAPS_SERVICE_URL: http://maps:3004
       HEATMAP_SERVICE_URL: http://heatmap:3006
-      # rate limits per client IP per minute. Raise them when you run the load test
-      # (all its traffic comes from one IP):  RATE_LIMIT_PER_MIN=10000000 docker compose up
+      # rate limits per client IP per minute (override from your shell if needed)
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-600}
       AUTH_RATE_LIMIT_PER_MIN: ${AUTH_RATE_LIMIT_PER_MIN:-20}
       RIDE_RATE_LIMIT_PER_MIN: ${RIDE_RATE_LIMIT_PER_MIN:-15}

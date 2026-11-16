@@ -1,8 +1,7 @@
 const { publishToQueue } = require('./rabbit');
 
-// Instead of talking to sockets directly, the ride service drops a message
-// on the "ride-events" queue. The realtime service picks it up and
-// pushes it to the right browsers.
+// The ride service never talks to sockets directly. It drops a message on the
+// "ride-events" queue and the realtime service pushes it to the right browsers.
 module.exports.publishEvent = (event, rooms, data) => {
     return publishToQueue('ride-events', JSON.stringify({ event, rooms, data }));
 }

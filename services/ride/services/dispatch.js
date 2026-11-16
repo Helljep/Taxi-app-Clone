@@ -1,44 +1,24 @@
 const rideModel = require('../models/ride.model');
 const captainClient = require('./captain.client');
-const clients = require('./clients');
-const { publishEvent } = require('./events');
+const mapService = require('./maps.client');
 const rideService = require('./ride.service');
+const { publishEvent } = require('./events');
 
-// Smart dispatch: instead of shouting the ride to every captain nearby and letting
-// the fastest finger win, we offer it to ONE captain at a time, best match first:
+// Dispatch offers a ride to ONE captain at a time, best match first:
 //   1. find free captains of the right vehicle type near the pickup
-//   2. rank them by real driving time to the pickup (the ETA)
+//   2. rank them by driving time to the pickup
 //   3. offer the ride to the best one, with a countdown
-//   4. captain declines or the time runs out -> offer to the next best
-//   5. nobody left -> the ride is cancelled and the rider is told
-// Result: shorter waits for riders, and no stampede of captains for the same ride.
+//   4. if they decline or time runs out, offer it to the next one
+//   5. if nobody is left, cancel the ride and tell the rider
 
 const OFFER_TIMEOUT = Number(process.env.OFFER_TIMEOUT_MS) || 15000; // ms a captain has to answer
 const SEARCH_RADIUS_KM = 3;
 const MAX_OFFERS = 5;
 
-// rideId -> { timer, captainId } for the offer that is currently open.
-// These live in this server's memory: with several ride servers you would keep
-// them in Redis (or use delayed queue messages) so any server can expire an offer.
+// rideId -> { timer, captainId } for the offer that is open right now
+// (kept in memory, so this service runs as a single copy)
 const openOffers = new Map();
 
-
-// Pure ranking logic (no network), so it is easy to test.
-// captains: documents with _id; etas: seconds, same order as captains (null = unknown)
-function rankCandidates({ captains, etas, busyIds = [], offeredIds = [] }) {
-    const skip = new Set([ ...busyIds, ...offeredIds ].map(String));
-
-    return captains
-        .map((captain, i) => ({ captain, etaSeconds: etas?.[ i ] ?? null }))
-        .filter(({ captain }) => !skip.has(String(captain._id)))
-        // known ETAs first (smallest to largest), unknown ones last
-        .sort((a, b) => {
-            if (a.etaSeconds === null && b.etaSeconds === null) return 0;
-            if (a.etaSeconds === null) return 1;
-            if (b.etaSeconds === null) return -1;
-            return a.etaSeconds - b.etaSeconds;
-        });
-}
 
 const toPoint = (captain) => ({
     ltd: captain.location.coordinates[ 1 ],
@@ -47,44 +27,66 @@ const toPoint = (captain) => ({
 
 const toMinutes = (seconds) => seconds === null ? null : Math.max(1, Math.ceil(seconds / 60));
 
+const hasLocation = (captain) => captain.location?.coordinates?.length === 2;
 
-// captains that already have a ride in progress are not free
+
+// Captains with the shortest ETA come first, captains without an ETA come last.
+function rankByEta(captains, etas) {
+    return captains
+        .map((captain, i) => ({ captain, etaSeconds: etas?.[ i ] ?? null }))
+        .sort((a, b) => {
+            if (a.etaSeconds === null) return b.etaSeconds === null ? 0 : 1;
+            if (b.etaSeconds === null) return -1;
+            return a.etaSeconds - b.etaSeconds;
+        });
+}
+
+
+// captains who are already driving someone are not free
 async function findBusyCaptainIds(captains) {
-    const ids = captains.map(c => c._id);
-    return await rideModel.find({ captain: { $in: ids }, status: { $in: [ 'accepted', 'ongoing' ] } }).distinct('captain');
+    const ids = captains.map(captain => captain._id);
+
+    const busy = await rideModel
+        .find({ captain: { $in: ids }, status: { $in: [ 'accepted', 'ongoing' ] } })
+        .distinct('captain');
+
+    return busy.map(String);
 }
 
 
 async function findCandidates(ride, token) {
     const { ltd, lng } = ride.pickupCoordinates;
-    const nearby = (await captainClient.getCaptainsInTheRadius(ltd, lng, SEARCH_RADIUS_KM, ride.vehicleType))
-        .filter(c => c.location?.coordinates?.length === 2);
 
-    if (nearby.length === 0) return [];
+    const nearby = (await captainClient.getCaptainsInTheRadius(ltd, lng, SEARCH_RADIUS_KM, ride.vehicleType))
+        .filter(hasLocation);
+
+    const busy = await findBusyCaptainIds(nearby);
+    const alreadyOffered = ride.offeredTo.map(String);
+
+    const free = nearby.filter(captain =>
+        !busy.includes(String(captain._id)) && !alreadyOffered.includes(String(captain._id)));
+
+    if (free.length === 0) return [];
 
     let etas = null;
     try {
-        etas = await clients.getEtas(nearby.map(toPoint), { ltd, lng }, token);
+        etas = await mapService.getEtas(free.map(toPoint), { ltd, lng }, token);
     } catch (err) {
-        console.log('Could not get ETAs, ranking is unordered:', err.message);
+        console.log('Could not get ETAs:', err.message);
     }
 
-    return rankCandidates({
-        captains: nearby,
-        etas,
-        busyIds: await findBusyCaptainIds(nearby),
-        offeredIds: ride.offeredTo
-    });
+    return rankByEta(free, etas);
 }
 
 
 function clearOffer(rideId) {
-    const open = openOffers.get(String(rideId));
-    if (open) {
-        clearTimeout(open.timer);
+    const offer = openOffers.get(String(rideId));
+
+    if (offer) {
+        clearTimeout(offer.timer);
         openOffers.delete(String(rideId));
     }
-    return open;
+    return offer;
 }
 
 
@@ -94,21 +96,28 @@ async function giveUp(rideId) {
         { status: 'cancelled', cancelledBy: 'system' },
         { new: true }
     );
+
     if (!ride) return;
 
-    const data = { ...rideService.toClientShape(ride), reason: 'No captains available nearby' };
-    await publishEvent('ride-cancelled', [ `user:${ride.user}` ], data);
+    await publishEvent('ride-cancelled', [ `user:${ride.user}` ], {
+        ...rideService.toClientShape(ride),
+        reason: 'No captains available nearby'
+    });
 }
 
 
-// Offer the ride to the best captain who has not seen it yet.
-async function offerToNext(rideId, token) {
-    const previous = clearOffer(rideId);
+// closes the ride pop-up on the screen of the captain who held the offer
+function closeOfferPopup(captainId, rideId) {
+    publishEvent('ride-offer-expired', [ `captain:${captainId}` ], { rideId: String(rideId) })
+        .catch(err => console.log('Could not close offer:', err.message));
+}
 
-    // the previous captain's pop-up should disappear
-    if (previous) {
-        publishEvent('ride-offer-expired', [ `captain:${previous.captainId}` ], { rideId: String(rideId) })
-            .catch(() => { });
+
+async function offerToNext(rideId, token) {
+    const previousOffer = clearOffer(rideId);
+
+    if (previousOffer) {
+        closeOfferPopup(previousOffer.captainId, rideId);
     }
 
     const ride = await rideModel.findById(rideId);
@@ -123,8 +132,9 @@ async function offerToNext(rideId, token) {
 
     await rideModel.updateOne({ _id: rideId }, { $addToSet: { offeredTo: captain._id } });
 
-    // captains must not see the otp, only the user does
+    // captains must not see the otp, only the rider does
     const { otp, ...rideForCaptain } = rideService.toClientShape(ride);
+
     await publishEvent('new-ride', [ `captain:${captain._id}` ], {
         ...rideForCaptain,
         pickupEtaMinutes: toMinutes(etaSeconds),
@@ -139,47 +149,43 @@ async function offerToNext(rideId, token) {
 }
 
 
-module.exports.startDispatch = (rideId, token) => {
-    return offerToNext(rideId, token);
-}
+module.exports.startDispatch = (rideId, token) => offerToNext(rideId, token);
 
 // the captain who holds the offer pressed "Ignore"
 module.exports.declineOffer = async (rideId, captainId, token) => {
-    const open = openOffers.get(String(rideId));
-    if (!open || open.captainId !== String(captainId)) return false;
+    const offer = openOffers.get(String(rideId));
+
+    if (!offer || offer.captainId !== String(captainId)) return false;
 
     await offerToNext(rideId, token);
     return true;
 }
 
-// the ride was accepted or cancelled: stop the countdown, close the open pop-up
+// the ride was accepted or cancelled, so the countdown is no longer needed
 module.exports.stopDispatch = (rideId, { notifyCaptain = false } = {}) => {
-    const open = clearOffer(rideId);
+    const offer = clearOffer(rideId);
 
-    if (open && notifyCaptain) {
-        publishEvent('ride-offer-expired', [ `captain:${open.captainId}` ], { rideId: String(rideId) })
-            .catch(() => { });
+    if (offer && notifyCaptain) {
+        closeOfferPopup(offer.captainId, rideId);
     }
-    return open;
 }
 
-// "2 mins away" label per vehicle type for the vehicle list
+// the "N mins away" label for each vehicle type
 module.exports.etaByVehicleType = async (ltd, lng, token) => {
     const result = { car: null, moto: null, auto: null };
 
-    const nearby = (await captainClient.getCaptainsInTheRadius(ltd, lng, SEARCH_RADIUS_KM))
-        .filter(c => c.location?.coordinates?.length === 2);
-    if (nearby.length === 0) return result;
+    const nearby = (await captainClient.getCaptainsInTheRadius(ltd, lng, SEARCH_RADIUS_KM)).filter(hasLocation);
+    const busy = await findBusyCaptainIds(nearby);
+    const free = nearby.filter(captain => !busy.includes(String(captain._id)));
 
-    const busy = new Set((await findBusyCaptainIds(nearby)).map(String));
-    const free = nearby.filter(c => !busy.has(String(c._id)));
     if (free.length === 0) return result;
 
-    const etas = await clients.getEtas(free.map(toPoint), { ltd, lng }, token);
+    const etas = await mapService.getEtas(free.map(toPoint), { ltd, lng }, token);
 
     free.forEach((captain, i) => {
         const type = captain.vehicle.vehicleType;
         const minutes = toMinutes(etas[ i ] ?? null);
+
         if (minutes !== null && (result[ type ] === null || minutes < result[ type ])) {
             result[ type ] = minutes;
         }
@@ -187,15 +193,12 @@ module.exports.etaByVehicleType = async (ltd, lng, token) => {
     return result;
 }
 
-// After a restart the in-memory countdowns are gone, so any ride still "pending"
-// from before would wait forever. Close them.
-module.exports.recoverStaleRides = async () => {
+// After a restart the countdowns are gone, so rides still "pending" would wait forever.
+module.exports.closeStaleRides = async () => {
     const cutoff = new Date(Date.now() - 2 * 60 * 1000);
-    const result = await rideModel.updateMany(
+
+    await rideModel.updateMany(
         { status: 'pending', createdAt: { $lt: cutoff } },
         { status: 'cancelled', cancelledBy: 'system' }
     );
-    if (result.modifiedCount) console.log(`Closed ${result.modifiedCount} stale pending rides`);
 }
-
-module.exports.rankCandidates = rankCandidates;

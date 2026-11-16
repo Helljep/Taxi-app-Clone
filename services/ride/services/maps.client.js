@@ -18,3 +18,12 @@ module.exports.getAddressCoordinate = async (address, token) => {
     });
     return response.data;
 }
+
+// driving time in seconds from each point in `from` to the point `to`, in the same order
+module.exports.getEtas = async (from, to, token) => {
+    const response = await axios.post(`${process.env.MAPS_SERVICE_URL}/get-etas`, { from, to }, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 6000
+    });
+    return response.data.durations;
+}

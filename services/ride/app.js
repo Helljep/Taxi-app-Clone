@@ -14,7 +14,7 @@ connectToRabbit().catch(err => console.log(err.message));
 
 // rides left "pending" by a crash would wait forever, close them once the database is up
 mongoose.connection.once('open', () => {
-    dispatch.recoverStaleRides().catch(err => console.log(err.message));
+    dispatch.closeStaleRides().catch(err => console.log(err.message));
 });
 
 app.use(express.json());

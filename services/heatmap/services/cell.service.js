@@ -1,30 +1,26 @@
-const Redis = require('ioredis');
 const h3 = require('h3-js');
-const { surgeMultiplier } = require('./surge');
+const redis = require('../db/redis');
+const { surgeMultiplier } = require('./surge.service');
 
-// The map is cut into H3 hexagons. Resolution 8 is roughly 0.7 km2 per cell.
-// Every lat/lng becomes one short cell id, so "how many captains are here"
-// turns into a simple counter instead of a geo search over every captain.
+// The map is cut into H3 hexagons (resolution 8, about 0.7 km2 each), so a
+// location becomes one short cell id and "how many captains are here" is a
+// counter lookup instead of a geo search.
 const RESOLUTION = 8;
 
-const SUPPLY_TTL = 30 * 1000;       // a captain not heard from for 30s stops counting
-const DEMAND_WINDOW = 5 * 60 * 1000; // ride requests count for 5 minutes
+const SUPPLY_TTL = 30 * 1000;        // a captain not heard from for 30s stops counting
+const DEMAND_WINDOW = 5 * 60 * 1000; // a ride request counts for 5 minutes
 
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
-redis.on('error', (err) => console.log('Redis error:', err.message));
-
-// Redis layout
-//   supply:<cell>   sorted set  captainId -> last seen (ms)
-//   demand:<cell>   sorted set  rideId    -> requested at (ms)
-//   captain:cell    hash        captainId -> the cell they are counted in
-//   cells           set         cells that have (or recently had) activity
-// A sorted set (instead of a bare number) means a captain who crashes or loses
-// signal just ages out, so the counts can never drift upwards forever.
+// Redis layout:
+//   supply:<cell>  sorted set  captainId -> last seen (ms)
+//   demand:<cell>  sorted set  rideId    -> requested at (ms)
+//   captain:cell   hash        captainId -> the cell they are counted in
+//   cells          set         cells with recent activity
+// Sorted sets mean a captain who loses signal simply ages out of the count.
 
 const toCell = (ltd, lng) => h3.latLngToCell(Number(ltd), Number(lng), RESOLUTION);
 
 
-async function setCaptainPosition(captainId, ltd, lng) {
+module.exports.setCaptainPosition = async (captainId, ltd, lng) => {
     const cell = toCell(ltd, lng);
     const previous = await redis.hget('captain:cell', captainId);
 
@@ -39,8 +35,7 @@ async function setCaptainPosition(captainId, ltd, lng) {
 }
 
 
-// captain went offline, or took a ride and is no longer free
-async function removeCaptain(captainId) {
+module.exports.removeCaptain = async (captainId) => {
     const previous = await redis.hget('captain:cell', captainId);
     if (!previous) return;
 
@@ -51,8 +46,9 @@ async function removeCaptain(captainId) {
 }
 
 
-async function addDemand(ltd, lng, rideId) {
+module.exports.addDemand = async (ltd, lng, rideId) => {
     const cell = toCell(ltd, lng);
+
     await redis.multi()
         .zadd(`demand:${cell}`, Date.now(), String(rideId))
         .sadd('cells', cell)
@@ -83,10 +79,12 @@ async function countCells(cells) {
 }
 
 
-// Surge looks at the cell AND its 6 neighbours, so a rider standing on
-// a cell edge is priced by the area around them, not one hexagon.
+// Surge looks at the cell and its 6 neighbours, so a rider on a cell edge
+// is priced by the area around them.
 function areaTotals(cell, counts) {
-    let drivers = 0, demand = 0;
+    let drivers = 0;
+    let demand = 0;
+
     for (const near of h3.gridDisk(cell, 1)) {
         drivers += counts[near]?.drivers || 0;
         demand += counts[near]?.demand || 0;
@@ -95,7 +93,7 @@ function areaTotals(cell, counts) {
 }
 
 
-async function getSurgeAt(ltd, lng) {
+module.exports.getSurgeAt = async (ltd, lng) => {
     const cell = toCell(ltd, lng);
     const counts = await countCells(h3.gridDisk(cell, 1));
     const { drivers, demand } = areaTotals(cell, counts);
@@ -104,14 +102,14 @@ async function getSurgeAt(ltd, lng) {
 }
 
 
-// Everything the heatmap draws. Also tidies up cells that have gone quiet.
-async function getSnapshot() {
+// Everything the map draws. Cells that have gone quiet are cleaned up here.
+module.exports.getSnapshot = async () => {
     const active = await redis.smembers('cells');
     const counts = await countCells(active);
 
     const quiet = active.filter(cell => counts[cell].drivers === 0 && counts[cell].demand === 0);
     if (quiet.length > 0) {
-        await cleanUp(quiet);
+        await forgetCells(quiet);
     }
 
     return active
@@ -119,12 +117,11 @@ async function getSnapshot() {
         .map(cell => {
             const { drivers, demand } = counts[cell];
             const area = areaTotals(cell, counts);
-            const [ ltd, lng ] = h3.cellToLatLng(cell);
 
             return {
                 cell,
-                center: [ ltd, lng ],
-                boundary: h3.cellToBoundary(cell),   // [[lat, lng], ...] six corners
+                center: h3.cellToLatLng(cell),
+                boundary: h3.cellToBoundary(cell),
                 drivers,
                 demand,
                 surge: surgeMultiplier(area.demand, area.drivers)
@@ -133,12 +130,12 @@ async function getSnapshot() {
 }
 
 
-async function cleanUp(cells) {
+async function forgetCells(cells) {
     const cutoff = Date.now() - SUPPLY_TTL;
     const multi = redis.multi();
 
     for (const cell of cells) {
-        // forget captains that aged out, but only if they were not counted somewhere new
+        // captains that aged out are forgotten, unless they were counted in a newer cell
         const stale = await redis.zrangebyscore(`supply:${cell}`, '-inf', cutoff);
         for (const captainId of stale) {
             if (await redis.hget('captain:cell', captainId) === cell) {
@@ -150,13 +147,3 @@ async function cleanUp(cells) {
     }
     await multi.exec();
 }
-
-
-module.exports = {
-    setCaptainPosition,
-    removeCaptain,
-    addDemand,
-    getSurgeAt,
-    getSnapshot,
-    toCell
-};

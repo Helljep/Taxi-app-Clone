@@ -1,20 +1,15 @@
 const amqp = require('amqplib');
 
-// RabbitMQ helper shared (copied) by every service that uses the queue.
-//
-// Reliability features:
-//  - a message that makes the handler throw is retried up to MAX_RETRIES times
-//    (with a growing delay), then moved to "<queue>.dead" so it is never lost
-//    and never blocks the queue (a "dead-letter queue")
-//  - if RabbitMQ drops the connection we reconnect and re-subscribe
-//  - published messages are marked persistent
+// RabbitMQ helper (each service that uses the queue has its own copy).
+// A message whose handler throws is retried a few times, then moved to
+// "<queue>.dead" so it is never lost and never blocks the queue.
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000; // ms, multiplied by the attempt number
 
 let connection, channel;
 let connecting = null;
-const consumers = []; // { queueName, callback } so we can re-subscribe after a reconnect
+const consumers = []; // remembered so we can subscribe again after a reconnect
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -53,6 +48,7 @@ async function connect() {
     return connecting;
 }
 
+
 async function reconnect() {
     try {
         await connect();
@@ -65,7 +61,6 @@ async function reconnect() {
 }
 
 
-// Decides what happens to one message. Exported so it can be tested with a fake channel.
 async function handleMessage(ch, queueName, message, callback) {
     try {
         await callback(message.content.toString());
@@ -73,7 +68,7 @@ async function handleMessage(ch, queueName, message, callback) {
         const retries = (message.properties.headers?.[ 'x-retries' ] || 0) + 1;
 
         if (retries > MAX_RETRIES) {
-            console.log(`Giving up on a ${queueName} message after ${MAX_RETRIES} retries: ${err.message}`);
+            console.log(`Giving up on a ${queueName} message: ${err.message}`);
             await ch.assertQueue(`${queueName}.dead`);
             ch.sendToQueue(`${queueName}.dead`, message.content, {
                 persistent: true,
@@ -89,7 +84,7 @@ async function handleMessage(ch, queueName, message, callback) {
             }, RETRY_DELAY * retries);
         }
     } finally {
-        // always ack: a failed message has been re-queued or dead-lettered above
+        // the message was handled, re-queued or dead-lettered, so it is always acknowledged
         ch.ack(message);
     }
 }
@@ -98,18 +93,20 @@ async function handleMessage(ch, queueName, message, callback) {
 async function consume(queueName, callback) {
     if (!channel) await connect();
     const ch = channel;
+
     await ch.assertQueue(queueName);
-    // at most 10 unacknowledged messages at once, so a slow handler applies back-pressure
     await ch.prefetch(10);
     await ch.consume(queueName, (message) => {
         if (message) handleMessage(ch, queueName, message, callback);
     });
 }
 
+
 async function subscribeToQueue(queueName, callback) {
     consumers.push({ queueName, callback });
     await consume(queueName, callback);
 }
+
 
 async function publishToQueue(queueName, data) {
     if (!channel) await connect();
@@ -121,6 +118,4 @@ module.exports = {
     subscribeToQueue,
     publishToQueue,
     connect,
-    handleMessage,
-    MAX_RETRIES,
 };
