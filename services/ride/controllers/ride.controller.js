@@ -83,7 +83,7 @@ module.exports.confirmRide = async (req, res) => {
     } catch (err) {
 
         console.log(err.message);
-        return res.status(500).json({ message: err.message });
+        return res.status(err.status || 500).json({ message: err.message });
     }
 }
 
@@ -95,7 +95,7 @@ module.exports.declineRide = async (req, res) => {
         const declined = await dispatch.declineOffer(req.body.rideId, req.captain._id, req.token);
         return res.status(200).json({ declined });
     } catch (err) {
-        return res.status(500).json({ message: err.message });
+        return res.status(err.status || 500).json({ message: err.message });
     }
 }
 
@@ -112,7 +112,7 @@ module.exports.startRide = async (req, res) => {
 
         return res.status(200).json(rideData);
     } catch (err) {
-        return res.status(500).json({ message: err.message });
+        return res.status(err.status || 500).json({ message: err.message });
     }
 }
 
@@ -129,7 +129,7 @@ module.exports.endRide = async (req, res) => {
 
         return res.status(200).json(rideData);
     } catch (err) {
-        return res.status(500).json({ message: err.message });
+        return res.status(err.status || 500).json({ message: err.message });
     }
 }
 
@@ -149,6 +149,7 @@ async function cancel(req, res, by) {
         const rideData = rideService.toClientShape(ride);
 
         dispatch.stopDispatch(ride._id, { notifyCaptain: true });
+        heatmapClient.removeDemand(ride.pickupCoordinates.ltd, ride.pickupCoordinates.lng, ride._id);
 
         const rooms = by === 'user'
             ? (rideData.captain?._id ? [ `captain:${rideData.captain._id}` ] : [])
@@ -159,7 +160,7 @@ async function cancel(req, res, by) {
 
         return res.status(200).json(rideData);
     } catch (err) {
-        return res.status(400).json({ message: err.message });
+        return res.status(err.status || 400).json({ message: err.message });
     }
 }
 
@@ -199,6 +200,6 @@ module.exports.rateRide = async (req, res) => {
         });
         return res.status(200).json(rideService.toClientShape(ride));
     } catch (err) {
-        return res.status(400).json({ message: err.message });
+        return res.status(err.status || 400).json({ message: err.message });
     }
 }

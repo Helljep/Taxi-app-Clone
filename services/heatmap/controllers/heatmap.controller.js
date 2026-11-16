@@ -45,3 +45,21 @@ module.exports.addDemand = async (req, res) => {
         res.status(500).json({ message: err.message });
     }
 }
+
+// the ride was cancelled, so it stops counting as demand
+module.exports.removeDemand = async (req, res) => {
+    const ltd = Number(req.body.ltd);
+    const lng = Number(req.body.lng);
+    const { rideId } = req.body;
+
+    if (!isCoordinate(ltd, lng) || !rideId) {
+        return res.status(400).json({ message: 'ltd, lng and rideId are required' });
+    }
+
+    try {
+        await cellService.removeDemand(ltd, lng, rideId);
+        res.status(204).end();
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}

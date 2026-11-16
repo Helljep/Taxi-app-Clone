@@ -56,6 +56,11 @@ module.exports.addDemand = async (ltd, lng, rideId) => {
 }
 
 
+module.exports.removeDemand = async (ltd, lng, rideId) => {
+    await redis.zrem(`demand:${toCell(ltd, lng)}`, String(rideId));
+}
+
+
 // { cell: { drivers, demand } } for the given cells, in one round trip
 async function countCells(cells) {
     if (cells.length === 0) return {};
@@ -120,8 +125,6 @@ module.exports.getSnapshot = async () => {
 
             return {
                 cell,
-                center: h3.cellToLatLng(cell),
-                boundary: h3.cellToBoundary(cell),
                 drivers,
                 demand,
                 surge: surgeMultiplier(area.demand, area.drivers)

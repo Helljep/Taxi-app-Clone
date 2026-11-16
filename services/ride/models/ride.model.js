@@ -60,6 +60,9 @@ const rideSchema = new mongoose.Schema({
     // captains this ride was already offered to (dispatch never offers twice)
     offeredTo: [ { type: mongoose.Schema.Types.ObjectId } ],
 
+    // the one captain who may accept this ride right now
+    currentOffer: { type: mongoose.Schema.Types.ObjectId },
+
     paymentMethod: {
         type: String,
         enum: [ 'cash', 'wallet' ],
@@ -104,5 +107,11 @@ const rideSchema = new mongoose.Schema({
 }, {
     timestamps: true
 })
+
+// The database itself guarantees one open ride per rider and per captain, so two
+// requests arriving at the same moment can't both succeed.
+const OPEN = { $in: [ 'pending', 'accepted', 'ongoing' ] };
+rideSchema.index({ user: 1 }, { unique: true, partialFilterExpression: { status: OPEN } });
+rideSchema.index({ captain: 1 }, { unique: true, partialFilterExpression: { status: { $in: [ 'accepted', 'ongoing' ] } } });
 
 module.exports = mongoose.model('ride', rideSchema);

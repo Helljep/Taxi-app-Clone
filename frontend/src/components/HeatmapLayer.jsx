@@ -1,11 +1,13 @@
 import { useEffect, useContext } from 'react'
 import L from 'leaflet'
 import axios from 'axios'
+import { cellToBoundary } from 'h3-js'
 import { SocketContext } from '../context/SocketContext'
 
 // Draws the live driver heatmap on a Leaflet map as hexagons.
 //  - green  : free captains here (darker = more captains)
 //  - orange to red : busy area, more ride requests than captains (surge pricing)
+// The server only sends cell ids and counts (a few KB); the hexagon shape is worked out here.
 // The first picture comes from one HTTP call, after that the server pushes
 // a fresh one over the socket every few seconds, only when something changed.
 
@@ -30,7 +32,7 @@ const HeatmapLayer = ({ map }) => {
         const draw = (cells) => {
             layer.clearLayers()
             for (const cell of cells) {
-                L.polygon(cell.boundary, { weight: 1, ...colourFor(cell) })
+                L.polygon(cellToBoundary(cell.cell), { weight: 1, ...colourFor(cell) })
                     .bindTooltip(
                         `${cell.drivers} free captain${cell.drivers === 1 ? '' : 's'} · ` +
                         `${cell.demand} request${cell.demand === 1 ? '' : 's'}` +

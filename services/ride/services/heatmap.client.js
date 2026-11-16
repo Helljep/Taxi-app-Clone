@@ -29,3 +29,14 @@ module.exports.recordDemand = async (ltd, lng, rideId) => {
         console.log('Could not record demand:', err.message);
     }
 }
+
+// a ride that was cancelled is no longer demand
+module.exports.removeDemand = async (ltd, lng, rideId) => {
+    try {
+        await axios.post(`${process.env.HEATMAP_SERVICE_URL}/demand/remove`,
+            { ltd, lng, rideId: String(rideId) },
+            { headers, timeout: 2000 });
+    } catch (err) {
+        console.log('Could not remove demand:', err.message);
+    }
+}

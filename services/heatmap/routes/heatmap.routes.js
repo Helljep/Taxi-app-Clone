@@ -9,6 +9,7 @@ router.get('/', authMiddleware.authAny, heatmapController.getHeatmap)
 router.get('/surge', authMiddleware.internalOnly, heatmapController.getSurge)
 
 router.post('/demand', authMiddleware.internalOnly, heatmapController.addDemand)
+router.post('/demand/remove', authMiddleware.internalOnly, heatmapController.removeDemand)
 
 
 module.exports = router;

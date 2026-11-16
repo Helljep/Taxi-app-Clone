@@ -2,6 +2,7 @@ const rideModel = require('../models/ride.model');
 const captainClient = require('./captain.client');
 const mapService = require('./maps.client');
 const rideService = require('./ride.service');
+const heatmapClient = require('./heatmap.client');
 const { publishEvent } = require('./events');
 
 // Dispatch offers a ride to ONE captain at a time, best match first:
@@ -14,6 +15,10 @@ const { publishEvent } = require('./events');
 const OFFER_TIMEOUT = Number(process.env.OFFER_TIMEOUT_MS) || 15000; // ms a captain has to answer
 const SEARCH_RADIUS_KM = 3;
 const MAX_OFFERS = 5;
+const PUBLISH_RETRIES = 6;     // if the queue is down, try to send the offer this many times
+const PUBLISH_RETRY_MS = 5000;
+
+const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // rideId -> { timer, captainId } for the offer that is open right now
 // (kept in memory, so this service runs as a single copy)
@@ -93,11 +98,13 @@ function clearOffer(rideId) {
 async function giveUp(rideId) {
     const ride = await rideModel.findOneAndUpdate(
         { _id: rideId, status: 'pending' },
-        { status: 'cancelled', cancelledBy: 'system' },
+        { status: 'cancelled', cancelledBy: 'system', $unset: { currentOffer: 1 } },
         { new: true }
     );
 
     if (!ride) return;
+
+    heatmapClient.removeDemand(ride.pickupCoordinates.ltd, ride.pickupCoordinates.lng, ride._id);
 
     await publishEvent('ride-cancelled', [ `user:${ride.user}` ], {
         ...rideService.toClientShape(ride),
@@ -110,6 +117,24 @@ async function giveUp(rideId) {
 function closeOfferPopup(captainId, rideId) {
     publishEvent('ride-offer-expired', [ `captain:${captainId}` ], { rideId: String(rideId) })
         .catch(err => console.log('Could not close offer:', err.message));
+}
+
+
+// If RabbitMQ is down the offer can't be delivered. Keep trying for a while instead of
+// leaving the ride pending with nobody looking at it; after that the ride is cancelled.
+async function sendOffer(rideId, captainId, offer) {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await publishEvent('new-ride', [ `captain:${captainId}` ], offer);
+        } catch (err) {
+            console.log(`Could not send the offer (attempt ${attempt}): ${err.message}`);
+            if (attempt >= PUBLISH_RETRIES) {
+                await giveUp(rideId);
+                throw err;
+            }
+            await wait(PUBLISH_RETRY_MS);
+        }
+    }
 }
 
 
@@ -130,12 +155,16 @@ async function offerToNext(rideId, token) {
 
     const { captain, etaSeconds } = candidates[ 0 ];
 
-    await rideModel.updateOne({ _id: rideId }, { $addToSet: { offeredTo: captain._id } });
+    // currentOffer is what lets this captain, and nobody else, accept the ride
+    await rideModel.updateOne({ _id: rideId }, {
+        $addToSet: { offeredTo: captain._id },
+        currentOffer: captain._id
+    });
 
     // captains must not see the otp, only the rider does
     const { otp, ...rideForCaptain } = rideService.toClientShape(ride);
 
-    await publishEvent('new-ride', [ `captain:${captain._id}` ], {
+    await sendOffer(rideId, captain._id, {
         ...rideForCaptain,
         pickupEtaMinutes: toMinutes(etaSeconds),
         offerSeconds: Math.round(OFFER_TIMEOUT / 1000)
@@ -199,6 +228,6 @@ module.exports.closeStaleRides = async () => {
 
     await rideModel.updateMany(
         { status: 'pending', createdAt: { $lt: cutoff } },
-        { status: 'cancelled', cancelledBy: 'system' }
+        { status: 'cancelled', cancelledBy: 'system', $unset: { currentOffer: 1 } }
     );
 }

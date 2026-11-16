@@ -4,6 +4,7 @@ const heatmapClient = require('./heatmap.client');
 const userClient = require('./user.client');
 const captainClient = require('./captain.client');
 const crypto = require('crypto');
+const { RideError } = require('./errors');
 
 // a rider who cancels this many rides in this window is blocked for a while
 const MAX_CANCELS = 3;
@@ -58,7 +59,7 @@ function applySurge(fare, multiplier) {
 async function getFare(pickup, destination, token) {
 
     if (!pickup || !destination) {
-        throw new Error('Pickup and destination are required');
+        throw new RideError('Pickup and destination are required');
     }
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
@@ -103,7 +104,7 @@ module.exports.createRide = async ({
     user, pickup, destination, vehicleType, token, pickupCoordinates, paymentMethod = 'cash'
 }) => {
     if (!user || !pickup || !destination || !vehicleType) {
-        throw new Error('All fields are required');
+        throw new RideError('All fields are required');
     }
 
     const recentCancels = await rideModel.countDocuments({
@@ -114,24 +115,22 @@ module.exports.createRide = async ({
     });
 
     if (recentCancels >= MAX_CANCELS) {
-        const err = new Error('Too many cancelled rides. Please try again in a few minutes.');
-        err.status = 429;
-        throw err;
+        throw new RideError('Too many cancelled rides. Please try again in a few minutes.', 429);
     }
 
     const openRide = await rideModel.findOne({ user: user._id, status: { $in: [ 'pending', 'accepted', 'ongoing' ] } });
 
     if (openRide) {
-        const err = new Error('You already have a ride in progress.');
-        err.status = 409;
-        throw err;
+        throw new RideError('You already have a ride in progress.', 409);
     }
 
     const distanceTime = await mapService.getDistanceTime(pickup, destination, token);
     const surge = await heatmapClient.getSurge(pickupCoordinates.ltd, pickupCoordinates.lng);
     const fare = applySurge(calculateFare(distanceTime), surge.multiplier);
 
-    const ride = await rideModel.create({
+    let ride;
+    try {
+        ride = await rideModel.create({
         user: user._id,
         userInfo: { fullname: user.fullname },
         pickup,
@@ -144,7 +143,12 @@ module.exports.createRide = async ({
         surgeMultiplier: surge.multiplier,
         distance: distanceTime.distance.value,
         duration: distanceTime.duration.value
-    })
+        });
+    } catch (err) {
+        // two requests at once: the unique index let only one of them through
+        if (err.code === 11000) throw new RideError('You already have a ride in progress.', 409);
+        throw err;
+    }
 
     return ride;
 }
@@ -153,30 +157,39 @@ module.exports.confirmRide = async ({
     rideId, captain
 }) => {
     if (!rideId) {
-        throw new Error('Ride id is required');
+        throw new RideError('Ride id is required');
     }
 
     const busy = await rideModel.findOne({ captain: captain._id, status: { $in: [ 'accepted', 'ongoing' ] } });
 
     if (busy) {
-        throw new Error('You already have a ride in progress');
+        throw new RideError('You already have a ride in progress');
     }
 
-    // the status check makes sure two captains can't both accept the same ride
-    const ride = await rideModel.findOneAndUpdate({
+    // Only the captain who holds the offer can accept, and only while it is pending,
+    // so two captains can't take the same ride.
+    let ride;
+    try {
+        ride = await rideModel.findOneAndUpdate({
         _id: rideId,
-        status: 'pending'
+        status: 'pending',
+        currentOffer: captain._id
     }, {
         status: 'accepted',
+        $unset: { currentOffer: 1 },
         captain: captain._id,
         captainInfo: {
             fullname: captain.fullname,
             vehicle: captain.vehicle
         }
     }, { new: true }).select('+otp');
+    } catch (err) {
+        if (err.code === 11000) throw new RideError('You already have a ride in progress', 409);
+        throw err;
+    }
 
     if (!ride) {
-        throw new Error('Ride not found or already accepted');
+        throw new RideError('This ride is not offered to you or was already taken', 409);
     }
 
     return ride;
@@ -184,7 +197,7 @@ module.exports.confirmRide = async ({
 
 module.exports.startRide = async ({ rideId, otp, captain }) => {
     if (!rideId || !otp) {
-        throw new Error('Ride id and OTP are required');
+        throw new RideError('Ride id and OTP are required');
     }
 
     const ride = await rideModel.findOne({
@@ -192,19 +205,19 @@ module.exports.startRide = async ({ rideId, otp, captain }) => {
     }).select('+otp');
 
     if (!ride) {
-        throw new Error('Ride not found');
+        throw new RideError('Ride not found');
     }
 
     if (ride.status !== 'accepted') {
-        throw new Error('Ride not accepted');
+        throw new RideError('Ride not accepted');
     }
 
     if (String(ride.captain) !== String(captain._id)) {
-        throw new Error('This ride belongs to another captain');
+        throw new RideError('This ride belongs to another captain');
     }
 
     if (ride.otp !== otp) {
-        throw new Error('Invalid OTP');
+        throw new RideError('Invalid OTP');
     }
 
     ride.status = 'ongoing';
@@ -231,7 +244,7 @@ async function settlePayment(ride) {
 
 module.exports.endRide = async ({ rideId, captain }) => {
     if (!rideId) {
-        throw new Error('Ride id is required');
+        throw new RideError('Ride id is required');
     }
 
     // Moving ongoing -> completed is one atomic step, so a double tap on "Finish"
@@ -243,7 +256,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
     );
 
     if (!ride) {
-        throw new Error('Ride not found or not ongoing');
+        throw new RideError('Ride not found or not ongoing');
     }
 
     ride.paymentStatus = await settlePayment(ride);
@@ -262,7 +275,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
 // A rider can cancel until the trip starts, a captain only after accepting.
 module.exports.cancelRide = async ({ rideId, by, userId, captainId }) => {
     if (!rideId) {
-        throw new Error('Ride id is required');
+        throw new RideError('Ride id is required');
     }
 
     const filter = { _id: rideId };
@@ -276,10 +289,10 @@ module.exports.cancelRide = async ({ rideId, by, userId, captainId }) => {
     }
 
     const ride = await rideModel.findOneAndUpdate(filter,
-        { status: 'cancelled', cancelledBy: by }, { new: true });
+        { status: 'cancelled', cancelledBy: by, $unset: { currentOffer: 1 } }, { new: true });
 
     if (!ride) {
-        throw new Error('This ride cannot be cancelled');
+        throw new RideError('This ride cannot be cancelled');
     }
 
     return ride;
@@ -296,7 +309,7 @@ module.exports.getHistory = async ({ userId, captainId }) => {
 
 module.exports.rateRide = async ({ rideId, userId, score, comment }) => {
     if (!Number.isInteger(score) || score < 1 || score > 5) {
-        throw new Error('Rating must be a whole number from 1 to 5');
+        throw new RideError('Rating must be a whole number from 1 to 5');
     }
 
     // only a ride with no rating yet matches, so a ride can be rated once
@@ -307,7 +320,7 @@ module.exports.rateRide = async ({ rideId, userId, score, comment }) => {
     );
 
     if (!ride) {
-        throw new Error('Ride not found, not finished, or already rated');
+        throw new RideError('Ride not found, not finished, or already rated');
     }
 
     try {
