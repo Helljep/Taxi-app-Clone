@@ -1,52 +1,49 @@
 import React from 'react'
+import RouteTimeline from './RouteTimeline'
+import { RIDES } from './VehiclePanel'
 
 const WaitingForDriver = (props) => {
-  return (
-    <div>
-      <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-        props.waitingForDriver(false)
-      }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
+    const captain = props.ride?.captain
+    const vehicle = captain?.vehicle
+    const kind = RIDES[ vehicle?.vehicleType ] || RIDES.car
+    const digits = String(props.ride?.otp || '').split('')
 
-      <div className='flex items-center justify-between'>
-        <img className='h-12' src="https://swyft.pl/wp-content/uploads/2023/05/how-many-people-can-a-uberx-take.jpg" alt="" />
-        <div className='text-right'>
-          <h2 className='text-lg font-medium capitalize'>{props.ride?.captain?.fullname?.firstname}</h2>
-          <h4 className='text-xl font-semibold -mt-1 -mb-1'>{props.ride?.captain?.vehicle?.plate}</h4>
-          <p className='text-sm text-gray-600'>Maruti Suzuki Alto</p>
-          <h1 className='text-lg font-semibold'>  {props.ride?.otp} </h1>
-        </div>
-      </div>
+    return (
+        <div>
+            <div className='handle' />
+            <h3 className='text-[22px] font-bold'>Meet at the pickup point</h3>
+            <p className='mb-4 mt-1 text-sm text-[#6b6b6b]'>Your driver is on the way. Share the PIN below to start the trip.</p>
 
-      <div className='flex gap-2 justify-between flex-col items-center'>
-        <div className='w-full mt-5'>
-          <div className='flex items-center gap-5 p-3 border-b-2'>
-            <i className="ri-map-pin-user-fill"></i>
-            <div>
-              <h3 className='text-lg font-medium'>562/11-A</h3>
-              <p className='text-sm -mt-1 text-gray-600'>{props.ride?.pickup}</p>
+            <div className='flex items-center gap-4 rounded-xl bg-[#f6f6f6] p-3'>
+                <div className='flex h-12 w-12 items-center justify-center rounded-full bg-black text-lg font-semibold uppercase text-white'>
+                    {captain?.fullname?.firstname?.[ 0 ] || '?'}
+                </div>
+                <div className='min-w-0 flex-1'>
+                    <h4 className='truncate text-base font-semibold capitalize'>{captain?.fullname?.firstname}</h4>
+                    <p className='text-sm capitalize text-[#6b6b6b]'>{vehicle?.color} {kind.name}</p>
+                </div>
+                <span className='rounded-md border-2 border-black px-2 py-1 text-sm font-bold tracking-wider'>{vehicle?.plate}</span>
             </div>
-          </div>
-          <div className='flex items-center gap-5 p-3 border-b-2'>
-            <i className="text-lg ri-map-pin-2-fill"></i>
-            <div>
-              <h3 className='text-lg font-medium'>562/11-A</h3>
-              <p className='text-sm -mt-1 text-gray-600'>{props.ride?.destination}</p>
+
+            <div className='my-4'>
+                <p className='mb-2 text-sm font-medium'>Start your trip with this PIN</p>
+                <div className='flex gap-2'>
+                    {digits.map((d, i) => (
+                        <span key={i} className='flex h-12 flex-1 items-center justify-center rounded-lg bg-black text-xl font-semibold text-white'>{d}</span>
+                    ))}
+                </div>
             </div>
-          </div>
-          <div className='flex items-center gap-5 p-3'>
-            <i className="ri-currency-line"></i>
-            <div>
-              <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-              <p className='text-sm -mt-1 text-gray-600'>Pay by {props.ride?.paymentMethod || 'cash'}</p>
+
+            <RouteTimeline pickup={props.ride?.pickup} destination={props.ride?.destination} />
+
+            <div className='mt-4 flex items-center justify-between border-t border-[#eeeeee] pt-3 text-sm'>
+                <span className='text-[#6b6b6b]'>Pay by {props.ride?.paymentMethod || 'cash'}</span>
+                <span className='text-base font-semibold'>₹{props.ride?.fare}</span>
             </div>
-          </div>
+
+            <button onClick={props.cancelRide} className='btn btn-grey mt-4'>Cancel trip</button>
         </div>
-        <button
-          onClick={props.cancelRide}
-          className='w-full mt-2 bg-red-600 text-white font-semibold p-2 rounded-lg'>Cancel ride</button>
-      </div>
-    </div>
-  )
+    )
 }
 
 export default WaitingForDriver

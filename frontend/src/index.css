@@ -1,3 +1,59 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html, body {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: #000;
+    background: #fff;
+  }
+  button, input, select { font-family: inherit; }
+  input:focus { outline: 2px solid #000; outline-offset: 0; }
+}
+
+/* The look: black and white, 8px corners, bottom sheets with a drag handle. */
+@layer components {
+  .sheet {
+    @apply bg-white rounded-t-[20px];
+    box-shadow: 0 -6px 28px rgba(0, 0, 0, 0.16);
+  }
+  .handle {
+    @apply mx-auto mb-3 h-1 w-10 rounded-full bg-[#d6d6d6];
+  }
+  .btn {
+    @apply flex w-full items-center justify-center rounded-lg px-4 py-4 text-base font-medium transition;
+  }
+  .btn:disabled { @apply opacity-40; }
+  .btn-black { @apply bg-black text-white; }
+  .btn-black:active:not(:disabled) { @apply bg-[#333]; }
+  .btn-grey { @apply bg-[#eeeeee] text-black; }
+  .btn-grey:active:not(:disabled) { @apply bg-[#dcdcdc]; }
+  .field {
+    @apply w-full rounded-lg bg-[#eeeeee] px-4 py-3.5 text-base placeholder:text-[#6b6b6b];
+  }
+
+  /* the sliding bar Uber shows while it looks for a driver */
+  .progress {
+    position: relative;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: #e6e6e6;
+  }
+  .progress::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: -35%;
+    width: 35%;
+    border-radius: 2px;
+    background: #000;
+    animation: slide 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes slide {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}

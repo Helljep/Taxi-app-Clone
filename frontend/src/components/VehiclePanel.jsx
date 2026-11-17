@@ -1,60 +1,69 @@
-import React from 'react'
+import React, { useState } from 'react'
+import VehicleIcon from './VehicleIcon'
 
-// real driving time of the nearest free captain of this type (null = none nearby)
+export const RIDES = {
+    car: { name: 'UberGo', seats: 4, desc: 'Affordable, compact rides' },
+    moto: { name: 'Moto', seats: 1, desc: 'Affordable motorcycle rides' },
+    auto: { name: 'UberAuto', seats: 3, desc: 'Affordable auto rides' }
+}
+
+// "10:34 PM · 2 min away", like the Uber app (minutes = real driving time of the nearest free captain)
 const etaLabel = (minutes) => {
-    if (minutes === undefined) return 'Checking nearby captains...'
-    if (minutes === null) return 'No captains nearby'
-    return `${minutes} min${minutes === 1 ? '' : 's'} away`
+    if (minutes === undefined) return 'Checking nearby drivers…'
+    if (minutes === null) return 'No drivers nearby'
+    const arrival = new Date(Date.now() + minutes * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    return `${arrival} · ${minutes} min away`
 }
 
 const VehiclePanel = (props) => {
+    const [ selected, setSelected ] = useState('car')
+    const price = props.fare[ selected ]
+
     return (
         <div>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setVehiclePanel(false)
-            }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5'>Choose a Vehicle</h3>
+            <div className='handle' onClick={() => props.setVehiclePanel(false)} />
+            <h3 className='mb-3 text-[22px] font-bold'>Choose a ride</h3>
+
             {props.fare.surge?.multiplier > 1 && (
-                <div className='mb-3 p-2 rounded-lg bg-orange-100 text-orange-800 text-sm font-medium'>
-                    <i className="ri-flashlight-fill"></i> {props.fare.surge.multiplier}x surge: busy area, fewer captains than ride requests
+                <div className='mb-3 flex items-center gap-2 rounded-lg bg-[#fff3e0] p-3 text-sm font-medium text-[#8a4b00]'>
+                    <i className="ri-flashlight-fill text-base"></i>
+                    <span>Fares are {props.fare.surge.multiplier}x because it's busy here: more ride requests than drivers.</span>
                 </div>
             )}
-            <div onClick={() => {
-                props.setConfirmRidePanel(true)
-                props.selectVehicle('car')
-            }} className='flex border-2 active:border-black  mb-2 rounded-xl w-full p-3  items-center justify-between'>
-                <img className='h-10' src="https://swyft.pl/wp-content/uploads/2023/05/how-many-people-can-a-uberx-take.jpg" alt="" />
-                <div className='ml-2 w-1/2'>
-                    <h4 className='font-medium text-base'>UberGo <span><i className="ri-user-3-fill"></i>4</span></h4>
-                    <h5 className='font-medium text-sm'>{etaLabel(props.fare.eta?.car)}</h5>
-                    <p className='font-normal text-xs text-gray-600'>Affordable, compact rides</p>
-                </div>
-                <h2 className='text-lg font-semibold'>₹{props.fare.car}</h2>
+
+            <div className='-mx-1'>
+                {Object.entries(RIDES).map(([ type, ride ]) => (
+                    <button
+                        key={type}
+                        type='button'
+                        onClick={() => setSelected(type)}
+                        className={`mb-1 flex w-full items-center gap-3 rounded-xl border-2 p-3 text-left ${selected === type ? 'border-black' : 'border-transparent'}`}>
+                        <VehicleIcon type={type} />
+                        <div className='min-w-0 flex-1'>
+                            <h4 className='text-base font-semibold'>
+                                {ride.name} <span className='ml-1 text-sm font-normal text-[#6b6b6b]'><i className="ri-user-3-fill"></i> {ride.seats}</span>
+                            </h4>
+                            <p className='text-sm font-medium'>{etaLabel(props.fare.eta?.[ type ])}</p>
+                            <p className='truncate text-xs text-[#6b6b6b]'>{ride.desc}</p>
+                        </div>
+                        <p className='text-lg font-semibold'>{props.fare[ type ] !== undefined ? `₹${props.fare[ type ]}` : '…'}</p>
+                    </button>
+                ))}
             </div>
-            <div onClick={() => {
-                props.setConfirmRidePanel(true)
-                props.selectVehicle('moto')
-            }} className='flex border-2 active:border-black mb-2 rounded-xl w-full p-3  items-center justify-between'>
-                <img className='h-10' src="https://www.uber-assets.com/image/upload/f_auto,q_auto:eco,c_fill,h_638,w_956/v1649231091/assets/2c/7fa194-c954-49b2-9c6d-a3b8601370f5/original/Uber_Moto_Orange_312x208_pixels_Mobile.png" alt="" />
-                <div className='-ml-2 w-1/2'>
-                    <h4 className='font-medium text-base'>Moto <span><i className="ri-user-3-fill"></i>1</span></h4>
-                    <h5 className='font-medium text-sm'>{etaLabel(props.fare.eta?.moto)}</h5>
-                    <p className='font-normal text-xs text-gray-600'>Affordable motorcycle rides</p>
-                </div>
-                <h2 className='text-lg font-semibold'>₹{props.fare.moto}</h2>
+
+            <div className='my-3 flex items-center gap-3 border-t border-[#eeeeee] pt-3 text-sm font-medium'>
+                <i className="ri-money-rupee-circle-line text-xl"></i> Cash or wallet <span className='ml-auto text-[#6b6b6b]'>choose on the next step</span>
             </div>
-            <div onClick={() => {
-                props.setConfirmRidePanel(true)
-                props.selectVehicle('auto')
-            }} className='flex border-2 active:border-black mb-2 rounded-xl w-full p-3  items-center justify-between'>
-                <img className='h-10' src="https://www.uber-assets.com/image/upload/f_auto,q_auto:eco,c_fill,h_368,w_552/v1648431773/assets/1d/db8c56-0204-4ce4-81ce-56a11a07fe98/original/Uber_Auto_558x372_pixels_Desktop.png" alt="" />
-                <div className='ml-2 w-1/2'>
-                    <h4 className='font-medium text-base'>UberAuto <span><i className="ri-user-3-fill"></i>3</span></h4>
-                    <h5 className='font-medium text-sm'>{etaLabel(props.fare.eta?.auto)}</h5>
-                    <p className='font-normal text-xs text-gray-600'>Affordable Auto rides</p>
-                </div>
-                <h2 className='text-lg font-semibold'>₹{props.fare.auto}</h2>
-            </div>
+
+            <button
+                disabled={price === undefined}
+                onClick={() => {
+                    props.selectVehicle(selected)
+                    props.setConfirmRidePanel(true)
+                }}
+                className='btn btn-black'>
+                Choose {RIDES[ selected ].name}
+            </button>
         </div>
     )
 }

@@ -12,7 +12,7 @@ const CaptainDetails = () => {
 
     const online = captain.status === 'active'
     const ratingAverage = captain.rating?.count
-        ? (captain.rating.sum / captain.rating.count).toFixed(1)
+        ? (captain.rating.sum / captain.rating.count).toFixed(2)
         : 'New'
 
     // go online / offline. Offline captains get no ride offers and leave the heatmap.
@@ -35,37 +35,45 @@ const CaptainDetails = () => {
 
     return (
         <div>
-            <div className='flex items-center justify-between'>
-                <div className='flex items-center justify-start gap-3'>
-                    <img className='h-10 w-10 rounded-full object-cover' src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRdlMd7stpWUCmjpfRjUsQ72xSWikidbgaI1w&s" alt="" />
-                    <h4 className='text-lg font-medium capitalize'>{captain.fullname.firstname + " " + (captain.fullname.lastname || '')}</h4>
+            <div className='flex items-center gap-3'>
+                <div className='flex h-12 w-12 items-center justify-center rounded-full bg-black text-lg font-semibold uppercase text-white'>
+                    {captain.fullname.firstname?.[ 0 ]}
                 </div>
-                <div>
-                    <h4 className='text-xl font-semibold'>₹{captain.earnings || 0}</h4>
-                    <p className='text-sm text-gray-600'>Earned</p>
+                <div className='min-w-0 flex-1'>
+                    <h4 className='truncate text-lg font-semibold capitalize'>{captain.fullname.firstname + " " + (captain.fullname.lastname || '')}</h4>
+                    <p className='flex items-center gap-1 text-sm text-[#6b6b6b]'>
+                        <i className="ri-star-fill text-black"></i> {ratingAverage}
+                        <span className='mx-1'>·</span>
+                        <span className='capitalize'>{captain.vehicle?.vehicleType}</span>
+                    </p>
+                </div>
+                <div className='text-right'>
+                    <p className='text-2xl font-bold'>₹{captain.earnings || 0}</p>
+                    <p className='text-xs text-[#6b6b6b]'>Earnings</p>
                 </div>
             </div>
-            <div className='flex p-3 mt-6 bg-gray-100 rounded-xl justify-center gap-5 items-start'>
-                <div className='text-center'>
-                    <i className="text-3xl mb-2 font-thin ri-star-line"></i>
-                    <h5 className='text-lg font-medium'>{ratingAverage}</h5>
-                    <p className='text-sm text-gray-600'>Rating</p>
+
+            <div className='mt-4 grid grid-cols-3 gap-2'>
+                <div className='rounded-xl bg-[#f6f6f6] p-3 text-center'>
+                    <p className='text-xl font-bold'>{captain.ridesCompleted || 0}</p>
+                    <p className='text-xs text-[#6b6b6b]'>Trips</p>
                 </div>
-                <div className='text-center'>
-                    <i className="text-3xl mb-2 font-thin ri-roadster-line"></i>
-                    <h5 className='text-lg font-medium'>{captain.ridesCompleted || 0}</h5>
-                    <p className='text-sm text-gray-600'>Rides</p>
+                <div className='rounded-xl bg-[#f6f6f6] p-3 text-center'>
+                    <p className='text-xl font-bold'>{ratingAverage}</p>
+                    <p className='text-xs text-[#6b6b6b]'>Rating</p>
                 </div>
-                <Link to='/captain-history' className='text-center'>
-                    <i className="text-3xl mb-2 font-thin ri-booklet-line"></i>
-                    <h5 className='text-lg font-medium'>Trips</h5>
-                    <p className='text-sm text-gray-600'>History</p>
+                <Link to='/captain-history' className='rounded-xl bg-[#f6f6f6] p-3 text-center'>
+                    <p className='text-xl font-bold'><i className="ri-time-line"></i></p>
+                    <p className='text-xs text-[#6b6b6b]'>History</p>
                 </Link>
             </div>
-            <button
-                onClick={toggleOnline}
-                className={`w-full mt-4 p-3 rounded-lg font-semibold text-white ${online ? 'bg-green-600' : 'bg-gray-500'}`}>
-                {online ? 'You are online (tap to go offline)' : 'You are offline (tap to go online)'}
+
+            <div className='mt-4 flex items-center gap-2 text-sm font-medium'>
+                <span className={`h-2.5 w-2.5 rounded-full ${online ? 'bg-[#05944f]' : 'bg-[#a0a0a0]'}`} />
+                {online ? "You're online. Finding you trips…" : "You're offline"}
+            </div>
+            <button onClick={toggleOnline} className={`btn mt-2 ${online ? 'btn-grey' : 'btn-black'}`}>
+                {online ? 'Go offline' : 'Go online'}
             </button>
         </div>
     )

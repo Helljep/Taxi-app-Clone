@@ -1,7 +1,7 @@
 import React from 'react'
-import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
+import RouteTimeline from './RouteTimeline'
 
 
 const FinishRide = (props) => {
@@ -12,7 +12,6 @@ const FinishRide = (props) => {
         const response = await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/end-ride`, {
 
             rideId: props.ride._id
-
 
         }, {
             headers: {
@@ -28,53 +27,25 @@ const FinishRide = (props) => {
 
     return (
         <div>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setFinishRidePanel(false)
-            }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5'>Finish this Ride</h3>
-            <div className='flex items-center justify-between p-4 border-2 border-yellow-400 rounded-lg mt-4'>
-                <div className='flex items-center gap-3 '>
-                    <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
-                    <h2 className='text-lg font-medium'>{props.ride?.user.fullname.firstname}</h2>
+            <div className='handle' onClick={() => props.setFinishRidePanel(false)} />
+            <h3 className='text-[22px] font-bold'>Complete trip</h3>
+            <p className='mb-4 mt-1 text-sm text-[#6b6b6b]'>
+                {props.ride?.paymentMethod === 'wallet'
+                    ? "Paid from the rider's wallet. Collect cash only if the wallet was short."
+                    : 'Collect cash from the rider.'}
+            </p>
+
+            <div className='mb-4 flex items-center justify-between rounded-xl bg-[#f6f6f6] p-4'>
+                <div className='flex items-center gap-3'>
+                    <span className='flex h-10 w-10 items-center justify-center rounded-full bg-black text-white'><i className="ri-user-3-fill"></i></span>
+                    <span className='font-medium capitalize'>{props.ride?.user?.fullname?.firstname}</span>
                 </div>
-                <h5 className='text-lg font-semibold'>2.2 KM</h5>
+                <span className='text-2xl font-bold'>₹{props.ride?.fare}</span>
             </div>
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full mt-5'>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="ri-map-pin-user-fill"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>562/11-A</h3>
-                            <p className='text-sm -mt-1 text-gray-600'>{props.ride?.pickup}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="text-lg ri-map-pin-2-fill"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>562/11-A</h3>
-                            <p className='text-sm -mt-1 text-gray-600'>{props.ride?.destination}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-                            <p className='text-sm -mt-1 text-gray-600'>
-                                {props.ride?.paymentMethod === 'wallet' ? 'Paid from rider wallet (collect cash only if the wallet is short)' : 'Collect cash from the rider'}
-                            </p>
-                        </div>
-                    </div>
-                </div>
 
-                <div className='mt-10 w-full'>
+            <RouteTimeline pickup={props.ride?.pickup} destination={props.ride?.destination} />
 
-                    <button
-                        onClick={endRide}
-                        className='w-full mt-5 flex  text-lg justify-center bg-green-600 text-white font-semibold p-3 rounded-lg'>Finish Ride</button>
-
-
-                </div>
-            </div>
+            <button onClick={endRide} className='btn btn-black mt-5'>Complete trip</button>
         </div>
     )
 }

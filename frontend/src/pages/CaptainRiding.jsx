@@ -1,60 +1,41 @@
 import React, { useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import FinishRide from '../components/FinishRide'
-import { useGSAP } from '@gsap/react'
-import gsap from 'gsap'
 import LiveTracking from '../components/LiveTracking'
 
 const CaptainRiding = () => {
 
     const [ finishRidePanel, setFinishRidePanel ] = useState(false)
-    const finishRidePanelRef = useRef(null)
     const location = useLocation()
     const rideData = location.state?.ride
 
 
 
-    useGSAP(function () {
-        if (finishRidePanel) {
-            gsap.to(finishRidePanelRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(finishRidePanelRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ finishRidePanel ])
 
+    const [ title, ...rest ] = (rideData?.destination || '').split(',')
 
     return (
-        <div className='h-screen relative flex flex-col justify-end'>
+        <div className='relative flex h-screen flex-col justify-end'>
 
-            <div className='fixed p-6 top-0 flex items-center justify-between w-screen'>
-                <img className='w-16' src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.png" alt="" />
-                <Link to='/captain-home' className=' h-10 w-10 bg-white flex items-center justify-center rounded-full'>
-                    <i className="text-lg font-medium ri-logout-box-r-line"></i>
-                </Link>
+            <div className='fixed left-4 top-4 z-10 rounded-full bg-black px-4 py-2 text-sm font-semibold text-white shadow-md'>
+                <i className="ri-steering-2-line"></i> On trip
             </div>
 
-            <div className='h-1/5 p-6 flex items-center justify-between relative bg-yellow-400 pt-10'
-                onClick={() => {
-                    setFinishRidePanel(true)
-                }}
-            >
-                <h5 className='p-1 text-center w-[90%] absolute top-0' onClick={() => {
-
-                }}><i className="text-3xl text-gray-800 ri-arrow-up-wide-line"></i></h5>
-                <h4 className='text-xl font-semibold'>{'4 KM away'}</h4>
-                <button className=' bg-green-600 text-white font-semibold p-3 px-10 rounded-lg'>Complete Ride</button>
+            <div className='sheet relative z-10 px-4 pb-6 pt-3' onClick={() => setFinishRidePanel(true)}>
+                <div className='handle' />
+                <p className='text-sm font-medium text-[#6b6b6b]'>Drop-off</p>
+                <p className='truncate text-xl font-bold'>{title || 'Destination'}</p>
+                {rest.length > 0 && <p className='truncate text-sm text-[#6b6b6b]'>{rest.join(',').trim()}</p>}
+                <button className='btn btn-black mt-4'>Complete trip</button>
             </div>
-            <div ref={finishRidePanelRef} className='fixed w-full z-[500] bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>
+
+            <div className={`sheet fixed bottom-0 z-[500] w-full px-4 pb-6 pt-3 transition-transform duration-300 ${finishRidePanel ? 'translate-y-0' : 'pointer-events-none translate-y-[110%]'}`}>
                 <FinishRide
                     ride={rideData}
                     setFinishRidePanel={setFinishRidePanel} />
             </div>
 
-            <div className='h-screen fixed w-screen top-0 z-[-1]'>
+            <div className='fixed top-0 z-0 h-screen w-screen'>
                 <LiveTracking routeFrom={rideData?.pickup} routeTo={rideData?.destination} />
             </div>
 

@@ -27,7 +27,7 @@ const LiveTracking = ({ showHeatmap = false, routeFrom = null, routeTo = null })
 
     // create the map once
     useEffect(() => {
-        mapRef.current = L.map(mapDivRef.current).setView([ 20.5937, 78.9629 ], 5)
+        mapRef.current = L.map(mapDivRef.current, { zoomControl: false }).setView([ 20.5937, 78.9629 ], 5)
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,

@@ -1,93 +1,76 @@
 import React, { useState } from 'react'
-import { Link } from 'react-router-dom'
 import axios from 'axios'
 import { useNavigate } from 'react-router-dom'
+import RouteTimeline from './RouteTimeline'
 
 const ConfirmRidePopUp = (props) => {
     const [ otp, setOtp ] = useState('')
+    const [ error, setError ] = useState('')
     const navigate = useNavigate()
 
     const submitHander = async (e) => {
         e.preventDefault()
+        setError('')
 
-        const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/start-ride`, {
-            params: {
-                rideId: props.ride._id,
-                otp: otp
-            },
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem('token')}`
+        try {
+            const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/start-ride`, {
+                params: {
+                    rideId: props.ride._id,
+                    otp: otp
+                },
+                headers: {
+                    Authorization: `Bearer ${localStorage.getItem('token')}`
+                }
+            })
+
+            if (response.status === 200) {
+                props.setConfirmRidePopupPanel(false)
+                props.setRidePopupPanel(false)
+                navigate('/captain-riding', { state: { ride: props.ride } })
             }
-        })
-
-        if (response.status === 200) {
-            props.setConfirmRidePopupPanel(false)
-            props.setRidePopupPanel(false)
-            navigate('/captain-riding', { state: { ride: props.ride } })
+        } catch (err) {
+            setError(err.response?.data?.message || 'Could not start the trip. Check the PIN.')
         }
-
-
     }
+
     return (
         <div>
-            <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-                props.setRidePopupPanel(false)
-            }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-            <h3 className='text-2xl font-semibold mb-5'>Confirm this ride to Start</h3>
-            <div className='flex items-center justify-between p-3 border-2 border-yellow-400 rounded-lg mt-4'>
-                <div className='flex items-center gap-3 '>
-                    <img className='h-12 rounded-full object-cover w-12' src="https://i.pinimg.com/236x/af/26/28/af26280b0ca305be47df0b799ed1b12b.jpg" alt="" />
-                    <h2 className='text-lg font-medium capitalize'>{props.ride?.user.fullname.firstname}</h2>
-                </div>
-                <h5 className='text-lg font-semibold'>{props.ride?.pickupEtaMinutes ? `${props.ride.pickupEtaMinutes} min away` : ''}</h5>
+            <div className='handle' />
+            <h3 className='text-[22px] font-bold'>Pick up <span className='capitalize'>{props.ride?.user?.fullname?.firstname}</span></h3>
+            <p className='mb-4 mt-1 text-sm text-[#6b6b6b]'>
+                {props.ride?.pickupEtaMinutes ? `${props.ride.pickupEtaMinutes} min away · ` : ''}Ask the rider for their 6-digit PIN to start the trip.
+            </p>
+
+            <RouteTimeline pickup={props.ride?.pickup} destination={props.ride?.destination} />
+
+            <div className='mt-4 flex items-center justify-between border-t border-[#eeeeee] pt-3 text-sm'>
+                <span className='capitalize text-[#6b6b6b]'>{props.ride?.paymentMethod || 'cash'}</span>
+                <span className='text-base font-semibold'>₹{props.ride?.fare}</span>
             </div>
-            <div className='flex gap-2 justify-between flex-col items-center'>
-                <div className='w-full mt-5'>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="ri-map-pin-user-fill"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>562/11-A</h3>
-                            <p className='text-sm -mt-1 text-gray-600'>{props.ride?.pickup}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3 border-b-2'>
-                        <i className="text-lg ri-map-pin-2-fill"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>562/11-A</h3>
-                            <p className='text-sm -mt-1 text-gray-600'>{props.ride?.destination}</p>
-                        </div>
-                    </div>
-                    <div className='flex items-center gap-5 p-3'>
-                        <i className="ri-currency-line"></i>
-                        <div>
-                            <h3 className='text-lg font-medium'>₹{props.ride?.fare} </h3>
-                            <p className='text-sm -mt-1 text-gray-600'>Pay by {props.ride?.paymentMethod || 'cash'}</p>
-                        </div>
-                    </div>
-                </div>
 
-                <div className='mt-6 w-full'>
-                    <form onSubmit={submitHander}>
-                        <input value={otp} onChange={(e) => setOtp(e.target.value)} type="text" className='bg-[#eee] px-6 py-4 font-mono text-lg rounded-lg w-full mt-3' placeholder='Enter OTP' />
+            <form onSubmit={submitHander} className='mt-4'>
+                <input
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode='numeric'
+                    className='field text-center font-mono text-2xl tracking-[0.5em]'
+                    placeholder='······' />
+                {error && <p className='mt-2 text-sm font-medium text-[#e11900]'>{error}</p>}
 
-                        <button className='w-full mt-5 text-lg flex justify-center bg-green-600 text-white font-semibold p-3 rounded-lg'>Confirm</button>
-                        <button type='button' onClick={async () => {
-                            // cancelling after accepting tells the rider, so they can book someone else
-                            try {
-                                await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel-by-captain`, { rideId: props.ride._id }, {
-                                    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-                                })
-                            } catch (err) {
-                                console.log(err.response?.data?.message || err.message)
-                            }
-                            props.setConfirmRidePopupPanel(false)
-                            props.setRidePopupPanel(false)
-
-                        }} className='w-full mt-2 bg-red-600 text-lg text-white font-semibold p-3 rounded-lg'>Cancel ride</button>
-
-                    </form>
-                </div>
-            </div>
+                <button disabled={otp.length !== 6} className='btn btn-black mt-3'>Start trip</button>
+                <button type='button' onClick={async () => {
+                    // cancelling after accepting tells the rider, so they can book someone else
+                    try {
+                        await axios.post(`${import.meta.env.VITE_BASE_URL}/rides/cancel-by-captain`, { rideId: props.ride._id }, {
+                            headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+                        })
+                    } catch (err) {
+                        console.log(err.response?.data?.message || err.message)
+                    }
+                    props.setConfirmRidePopupPanel(false)
+                    props.setRidePopupPanel(false)
+                }} className='btn btn-grey mt-2 !text-[#e11900]'>Cancel trip</button>
+            </form>
         </div>
     )
 }

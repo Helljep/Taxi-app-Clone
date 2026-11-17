@@ -18,10 +18,6 @@ const Home = () => {
     const [ pickup, setPickup ] = useState('')
     const [ destination, setDestination ] = useState('')
     const [ panelOpen, setPanelOpen ] = useState(false)
-    const vehiclePanelRef = useRef(null)
-    const confirmRidePanelRef = useRef(null)
-    const vehicleFoundRef = useRef(null)
-    const waitingForDriverRef = useRef(null)
     const panelRef = useRef(null)
     const panelCloseRef = useRef(null)
     const [ vehiclePanel, setVehiclePanel ] = useState(false)
@@ -133,9 +129,8 @@ const Home = () => {
     useGSAP(function () {
         if (panelOpen) {
             gsap.to(panelRef.current, {
-                height: '70%',
-                padding: 24
-                // opacity:1
+                height: '58%',
+                padding: '4px 16px'
             })
             gsap.to(panelCloseRef.current, {
                 opacity: 1
@@ -152,54 +147,6 @@ const Home = () => {
         }
     }, [ panelOpen ])
 
-
-    useGSAP(function () {
-        if (vehiclePanel) {
-            gsap.to(vehiclePanelRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(vehiclePanelRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ vehiclePanel ])
-
-    useGSAP(function () {
-        if (confirmRidePanel) {
-            gsap.to(confirmRidePanelRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(confirmRidePanelRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ confirmRidePanel ])
-
-    useGSAP(function () {
-        if (vehicleFound) {
-            gsap.to(vehicleFoundRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(vehicleFoundRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ vehicleFound ])
-
-    useGSAP(function () {
-        if (waitingForDriver) {
-            gsap.to(waitingForDriverRef.current, {
-                transform: 'translateY(0)'
-            })
-        } else {
-            gsap.to(waitingForDriverRef.current, {
-                transform: 'translateY(100%)'
-            })
-        }
-    }, [ waitingForDriver ])
 
 
     async function findTrip() {
@@ -287,35 +234,40 @@ const Home = () => {
 
     return (
         <div className='h-screen relative overflow-hidden'>
-            <img className='w-16 absolute left-5 top-5 z-10' src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.png" alt="" />
-            <div className='absolute right-4 top-4 z-10 flex items-center gap-2'>
-                <button onClick={topUpWallet} className='bg-white px-3 py-2 rounded-full text-sm font-semibold shadow'>
-                    <i className="ri-wallet-3-line"></i> ₹{user.wallet ?? 0} +
-                </button>
-                <Link to='/history' className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow'>
-                    <i className="text-lg ri-history-line"></i>
+            <div className='absolute left-4 top-4 z-10'>
+                <Link to='/history' className='flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-md'>
+                    <i className="text-xl ri-history-line"></i>
                 </Link>
             </div>
+            <div className='absolute right-4 top-4 z-10'>
+                <button onClick={topUpWallet} className='rounded-full bg-white px-4 py-3 text-sm font-semibold shadow-md'>
+                    <i className="ri-wallet-3-line"></i> ₹{user.wallet ?? 0} <span className='ml-1 text-[#276ef1]'>Add</span>
+                </button>
+            </div>
             {notice && (
-                <div onClick={() => setNotice('')} className='absolute top-20 left-4 right-4 z-20 bg-black text-white text-sm p-3 rounded-lg'>
+                <div onClick={() => setNotice('')} className='absolute left-4 right-4 top-20 z-20 rounded-lg bg-black p-3 text-sm font-medium text-white shadow-lg'>
                     {notice}
                 </div>
             )}
             <div className='h-screen w-screen'>
                 <LiveTracking showHeatmap routeFrom={routeFrom} routeTo={routeTo} />
             </div>
-            <div className=' flex flex-col justify-end h-screen absolute top-0 w-full'>
-                <div className='h-[30%] p-6 bg-white relative'>
+            <div className='pointer-events-none absolute top-0 flex h-screen w-full flex-col justify-end'>
+                <div className='sheet pointer-events-auto relative shrink-0 px-4 pb-5 pt-3'>
+                    <div className='handle' />
                     <h5 ref={panelCloseRef} onClick={() => {
                         setPanelOpen(false)
-                    }} className='absolute opacity-0 right-6 top-6 text-2xl'>
+                    }} className='absolute right-4 top-4 text-2xl opacity-0'>
                         <i className="ri-arrow-down-wide-line"></i>
                     </h5>
-                    <h4 className='text-2xl font-semibold'>Find a trip</h4>
-                    <form className='relative py-3' onSubmit={(e) => {
+                    <h4 className='mb-3 text-[22px] font-bold'>Where to?</h4>
+                    <form className='relative' onSubmit={(e) => {
                         submitHandler(e)
                     }}>
-                        <div className="line absolute h-16 w-1 top-[50%] -translate-y-1/2 left-5 bg-gray-700 rounded-full"></div>
+                        {/* dot, line and square line up with the centres of the two fields (52px tall, 8px apart) */}
+                        <span className='pointer-events-none absolute left-[21px] top-[26px] h-[60px] w-px bg-[#bdbdbd]' />
+                        <span className='pointer-events-none absolute left-[17px] top-[22px] h-2 w-2 rounded-full bg-black' />
+                        <span className='pointer-events-none absolute left-[17px] top-[82px] h-2 w-2 bg-black' />
                         <input
                             onClick={() => {
                                 setPanelOpen(true)
@@ -323,9 +275,9 @@ const Home = () => {
                             }}
                             value={pickup}
                             onChange={handlePickupChange}
-                            className='bg-[#eee] px-12 py-2 text-lg rounded-lg w-full'
+                            className='field pl-11'
                             type="text"
-                            placeholder='Add a pick-up location'
+                            placeholder='Pickup location'
                         />
                         <input
                             onClick={() => {
@@ -334,17 +286,18 @@ const Home = () => {
                             }}
                             value={destination}
                             onChange={handleDestinationChange}
-                            className='bg-[#eee] px-12 py-2 text-lg rounded-lg w-full  mt-3'
+                            className='field mt-2 pl-11'
                             type="text"
-                            placeholder='Enter your destination' />
+                            placeholder='Where to?' />
                     </form>
                     <button
                         onClick={findTrip}
-                        className='bg-black text-white px-4 py-2 rounded-lg mt-3 w-full'>
-                        Find Trip
+                        disabled={!pickup || !destination}
+                        className='btn btn-black mt-3'>
+                        See prices
                     </button>
                 </div>
-                <div ref={panelRef} className='bg-white h-0'>
+                <div ref={panelRef} className='pointer-events-auto h-0 overflow-y-auto bg-white'>
                     <LocationSearchPanel
                         suggestions={activeField === 'pickup' ? pickupSuggestions : destinationSuggestions}
                         setPanelOpen={setPanelOpen}
@@ -355,12 +308,12 @@ const Home = () => {
                     />
                 </div>
             </div>
-            <div ref={vehiclePanelRef} className='fixed w-full z-10 bottom-0 translate-y-full bg-white px-3 py-10 pt-12'>
+            <div className={`sheet fixed bottom-0 z-10 w-full px-4 pb-6 pt-3 transition-transform duration-300 ${vehiclePanel ? 'translate-y-0' : 'pointer-events-none translate-y-[110%]'}`}>
                 <VehiclePanel
                     selectVehicle={setVehicleType}
                     fare={fare} setConfirmRidePanel={setConfirmRidePanel} setVehiclePanel={setVehiclePanel} />
             </div>
-            <div ref={confirmRidePanelRef} className='fixed w-full z-10 bottom-0 translate-y-full bg-white px-3 py-6 pt-12'>
+            <div className={`sheet fixed bottom-0 z-10 w-full px-4 pb-6 pt-3 transition-transform duration-300 ${confirmRidePanel ? 'translate-y-0' : 'pointer-events-none translate-y-[110%]'}`}>
                 <ConfirmRide
                     paymentMethod={paymentMethod}
                     setPaymentMethod={setPaymentMethod}
@@ -373,7 +326,7 @@ const Home = () => {
 
                     setConfirmRidePanel={setConfirmRidePanel} setVehicleFound={setVehicleFound} />
             </div>
-            <div ref={vehicleFoundRef} className='fixed w-full z-10 bottom-0 translate-y-full bg-white px-3 py-6 pt-12'>
+            <div className={`sheet fixed bottom-0 z-10 w-full px-4 pb-6 pt-3 transition-transform duration-300 ${vehicleFound ? 'translate-y-0' : 'pointer-events-none translate-y-[110%]'}`}>
                 <LookingForDriver
                     cancelRide={cancelRide}
                     createRide={createRide}
@@ -383,7 +336,7 @@ const Home = () => {
                     vehicleType={vehicleType}
                     setVehicleFound={setVehicleFound} />
             </div>
-            <div ref={waitingForDriverRef} className='fixed w-full  z-10 bottom-0  bg-white px-3 py-6 pt-12'>
+            <div className={`sheet fixed bottom-0 z-10 w-full px-4 pb-6 pt-3 transition-transform duration-300 ${waitingForDriver ? 'translate-y-0' : 'pointer-events-none translate-y-[110%]'}`}>
                 <WaitingForDriver
                     cancelRide={cancelRide}
                     ride={ride}
